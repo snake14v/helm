@@ -4,14 +4,17 @@
 # (all agents share the Windows filesystem, so "file transfer" = same cwd + handoff note).
 # Returns JSON: {winner, exitCode, outputFile, switched:[...], handoff}.
 #
-#   .\agent-failover.ps1 -Prompt "..." -Cwd "C:\repo" [-Mission mission_id] [-TestMode]
-# -TestMode: makes the Claude step EMIT a fake credit error (no real claude call) so you can
-#            verify the switchover to Codex live, without actually exhausting your quota.
+#   .\agent-failover.ps1 -Prompt "..." -Cwd "C:\repo" [-Mission mission_id] [-TestMode] [-SkipClaude]
+# -TestMode:   makes the Claude step EMIT a fake credit error (no real claude call) so you can
+#              verify the switchover to Codex live, without actually exhausting your quota.
+# -SkipClaude: bypass Tier 1 entirely and start the chain at Codex. Honors an explicit "don't use
+#              Claude" directive (run the whole fleet, just not Claude). Added 2026-07-08.
 param(
   [Parameter(Mandatory)] [string]$Prompt,
   [string]$Cwd = $PWD.Path,
   [string]$Mission = "",
-  [switch]$TestMode
+  [switch]$TestMode,
+  [switch]$SkipClaude
 )
 $ErrorActionPreference = 'Continue'
 # SECURITY (Review 2026-07-08, CONFIRMED critical): $Prompt carries attacker/LLM-controlled mission
@@ -84,6 +87,11 @@ Mission id is set ($Mission), POST the final status to $api/api/job when done.
 $switched = @()
 $claudeToken = [Environment]::GetEnvironmentVariable('CLAUDE_CODE_OAUTH_TOKEN','User')
 
+if ($SkipClaude) {
+  Log "SKIP-CLAUDE -> bypassing Tier 1; starting the chain at Codex (honoring the no-Claude directive)."
+  $switched += 'claude:skipped'
+  BoardStatus "no-Claude mode -> executing on Codex"
+} else {
 # ---------- Tier 1: Claude (headless) ----------
 Log "TIER 1 -> Claude"
 BoardStatus "running on Claude"
@@ -113,6 +121,7 @@ if (-not (Wait-Switch 'Claude' 'Codex' "Claude was exhausted/failed on: $Prompt"
   BoardStatus "held - Claude exhausted, switch to Codex NOT approved"
   @{winner='none';exitCode=1;switched=$switched;handoff=$null;needsHuman=$true;reason='switch to Codex denied/timed out'} | ConvertTo-Json -Compress; return
 }
+}  # end: not $SkipClaude (Tier 1 = Claude)
 
 # ---------- Tier 2: Codex ----------
 $handoff = WriteHandoff 'Claude' $claudeOut
@@ -125,9 +134,14 @@ $codexOut = Join-Path $logDir "codex-$stamp.log"
 if ($codex -and (Test-Path $codex)) {
   $cxPrompt = "You are the FAILOVER executor (Claude ran out of credits). Read the handoff at `"$handoff`" then complete this task: $Prompt"
   $cxStdin = Join-Path $logDir "empty.txt"; if(-not(Test-Path $cxStdin)){ Set-Content $cxStdin "" -NoNewline }
-  # workspace-write (not deprecated --full-auto); redirect empty stdin so codex doesn't hang reading it
+  # FULL headless autonomy so Codex can actually run commands + edit files (parity with the Claude
+  # tier's acceptEdits). Verified 2026-07-09: '--sandbox workspace-write' was silently downgraded to
+  # read-only in exec mode (Codex reported "sandbox: read-only" and could not run npm or write the
+  # report), so use the explicit bypass flag. HELM is trusted local automation on the user's own
+  # machine + repos, and $Prompt is already argv-sanitized above. -C pins the working root through
+  # the codex.cmd shim; redirect empty stdin so codex doesn't hang reading it.
   $p2 = Start-Process $codex -PassThru -Wait -WindowStyle Hidden -WorkingDirectory $Cwd `
-        -ArgumentList @('exec','--sandbox','workspace-write','--skip-git-repo-check', "`"$cxPrompt`"") `
+        -ArgumentList @('exec','--dangerously-bypass-approvals-and-sandbox','--skip-git-repo-check','-C',"`"$Cwd`"", "`"$cxPrompt`"") `
         -RedirectStandardInput $cxStdin -RedirectStandardOutput $codexOut -RedirectStandardError "$codexOut.err"
   $c2 = $p2.ExitCode
   $codexText = (Get-Content $codexOut,"$codexOut.err" -Raw -EA SilentlyContinue) -join "`n"
