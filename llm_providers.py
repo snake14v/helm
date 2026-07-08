@@ -4,6 +4,7 @@
 # is picked up without restarting the server). Nothing here needs Vaishak's key to EXIST - it
 # reports honestly whether each is connected, and `call()` works the instant a key is set.
 import json, os, time, urllib.request, urllib.error
+import model_rank
 
 # A browser-ish User-Agent: some providers (Groq) sit behind Cloudflare and 403 the default
 # "Python-urllib/x.y" signature (error 1010). Sending a normal UA fixes it. (Verified 2026-07-08.)
@@ -117,7 +118,9 @@ def call(provider, prompt, model=None, timeout=60, max_tokens=1024):
         return {"ok": False, "error": f"no key set ({p['env']}) - run connect-model.ps1 {provider}"}
     eff = model or _model_override(provider)   # a working model the auto-fixer discovered
     if eff:
-        return _request(p, key, eff, prompt, timeout, max_tokens)
+        r = _request(p, key, eff, prompt, timeout, max_tokens)
+        model_rank.record(provider, r.get("ok"), r.get("ms"), kind="cloud")
+        return r
     # OpenRouter: free models rate-limit hard (429) or go paid (404). Try several free ones in
     # order; return the first success, or stop early on a definitive auth error (401/403).
     if provider == "openrouter":
@@ -125,9 +128,13 @@ def call(provider, prompt, model=None, timeout=60, max_tokens=1024):
         for mid in _openrouter_free_models(key)[:4]:
             r = _request(p, key, mid, prompt, timeout, max_tokens)
             if r["ok"] or r.get("code") in (401, 403):
+                model_rank.record(provider, r.get("ok"), r.get("ms"), kind="cloud")
                 return r
+        model_rank.record(provider, False, None, kind="cloud")
         return r or {"ok": False, "error": "no free OpenRouter model responded (all rate-limited?)"}
-    return _request(p, key, p["model"], prompt, timeout, max_tokens)
+    r = _request(p, key, p["model"], prompt, timeout, max_tokens)
+    model_rank.record(provider, r.get("ok"), r.get("ms"), kind="cloud")
+    return r
 
 def test(provider):
     """Tiny real call to prove the connection works end-to-end."""
@@ -157,21 +164,25 @@ def status_all():
     return {pid: {"label": p["label"], "keySet": bool(_key(p["env"])), "env": p["env"], "model": p["model"]}
             for pid, p in PROVIDERS.items()}
 
-# Failover priority for the cloud advisory tier: strongest/most-generous free tiers first.
-# (OpenRouter fronts Kimi K2 free + MiMo + DeepSeek + many models on ONE key, so it leads.)
+# Cold-start ordering ONLY - which cloud providers to try first before any real track record
+# exists (OpenRouter fronts Kimi K2 free + MiMo + DeepSeek + many models on ONE key, so it leads).
+# The ACTUAL try order used at runtime is model_rank.rank(), which starts here and then reorders
+# itself as real calls succeed/fail/rate-limit - so "best" adapts over time instead of staying fixed.
 PRIORITY = ["openrouter", "groq", "cerebras", "moonshot", "gemini"]
 
 def available():
-    """Which cloud providers have a key set right now (in priority order)."""
-    return [pid for pid in PRIORITY if _key(PROVIDERS[pid]["env"])]
+    """Cloud providers with a key set right now, ordered by live track record (best-performing
+    first) - falls back to the cold-start PRIORITY order for providers with no history yet."""
+    have = [pid for pid in PRIORITY if _key(PROVIDERS[pid]["env"])]
+    return model_rank.rank(have, kind="cloud", fallback_order=PRIORITY)
 
 def call_first_available(prompt, max_tokens=1500, timeout=90):
-    """Try each key-having provider in priority order; return the first that answers.
-    This is the cloud advisory tier of the failover chain (used when Claude+Codex are out)."""
+    """Try each key-having provider, best-track-record first (model_rank); return the first that
+    answers. This is the cloud advisory tier of the failover chain (used when Claude+Codex are out)."""
+    have = [pid for pid in PRIORITY if _key(PROVIDERS[pid]["env"])]
+    order = model_rank.rank(have, kind="cloud", fallback_order=PRIORITY)
     tried = []
-    for pid in PRIORITY:
-        if not _key(PROVIDERS[pid]["env"]):
-            continue
+    for pid in order:
         r = call(pid, prompt, max_tokens=max_tokens, timeout=timeout)
         tried.append({"provider": pid, "ok": r.get("ok"), "error": r.get("error")})
         if r.get("ok"):

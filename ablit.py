@@ -64,15 +64,76 @@ def ollama_tags():
         return []
 
 
+_SUGGEST_CACHE = {"t": 0, "data": []}
+
+def suggest_new_abliterated(limit=3, ttl=6 * 3600):
+    """Live HF search for currently-popular abliterated GGUF models NOT already in CATALOG or
+    pulled - so the local fleet can improve over time instead of staying frozen to whatever was
+    known when CATALOG was written. Cached (6h) so the Abliterated tab doesn't hit HF on every
+    poll; on a transient network failure it keeps serving the last good result rather than going
+    blank. Purely a suggestion surfaced in the UI - never auto-pulled (that stays a manual click)."""
+    now = time.time()
+    if now - _SUGGEST_CACHE["t"] < ttl:
+        return _SUGGEST_CACHE["data"]
+    results = hf_search("abliterated gguf", limit=8)
+    if isinstance(results, dict):  # hf_search's error shape - keep serving the last good value
+        return _SUGGEST_CACHE["data"]
+    known = {m["id"].lower().replace("hf.co/", "") for m in CATALOG}  # CATALOG ids carry an hf.co/ prefix; HF search results don't
+    have = set(t.lower() for t in ollama_tags())
+    out = []
+    for m in results:
+        mid = m.get("id") or ""
+        low = mid.lower()
+        if not mid or not m.get("gguf") or low in known:
+            continue
+        if any(low in h or h.split(":")[0] in low for h in have):
+            continue
+        out.append({"id": mid, "downloads": m.get("downloads", 0), "likes": m.get("likes", 0)})
+    out.sort(key=lambda m: -m["downloads"])
+    out = out[:limit]
+    _SUGGEST_CACHE.update(t=now, data=out)
+    return out
+
+
 def state():
-    """Catalog + which are already pulled locally + ollama health."""
+    """Catalog + which are already pulled locally + ollama health + any newer model worth trying."""
     have = set(ollama_tags())
     def pulled(cid):
         base = cid.lower()
         return any(base in h.lower() or h.lower().split(":")[0] in base for h in have)
     return {"ollama": ollama_up(), "local": sorted(have),
-            "catalog": [{**m, "pulled": pulled(m["id"])} for m in CATALOG]}
+            "catalog": [{**m, "pulled": pulled(m["id"])} for m in CATALOG],
+            "suggested": suggest_new_abliterated()}
 
+
+def pick_model():
+    """A pulled local model to run classification on (prefer small, fast, present)."""
+    tags = ollama_tags()
+    for pref in ("gemma3:4b", "qwen2.5:3b", "llama3.2:3b", "deepseek-r1:1.5b"):
+        if pref in tags:
+            return pref
+    return tags[0] if tags else None
+
+def classify(text, options):
+    """Local LLM classifier (Ollama). options=[{id,label,desc}] -> best-matching id, or None.
+    Used to auto-pick the venture for a mission - free, on-device, no cloud tokens."""
+    if not text or not options or not ollama_up():
+        return None
+    model = pick_model()
+    if not model:
+        return None
+    ids = [o["id"] for o in options]
+    lines = "\n".join(f"- {o['id']}: {o.get('label','')} - {o.get('desc','')}" for o in options)
+    prompt = ("Pick the ONE project that best matches the task below. Answer with ONLY the project id "
+              "(a single lowercase word from the list), nothing else.\n\n"
+              f"PROJECTS:\n{lines}\n\nTASK: {text}\n\nBest project id:")
+    r = chat(model, prompt, timeout=45)
+    if not r.get("ok"):
+        return {"venture": None, "error": r.get("error"), "model": model}
+    out = (r.get("text") or "").strip().lower()
+    first = (out.split() or [""])[0].strip(".,:;\"'`*")
+    vid = first if first in ids else next((i for i in ids if i in out), None)
+    return {"venture": vid, "model": model, "ms": r.get("ms")}
 
 def chat(model, prompt, image_b64=None, timeout=180):
     """Run a local turn against a pulled model. image_b64 (no data: prefix) enables vision models."""

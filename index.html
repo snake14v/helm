@@ -149,6 +149,7 @@
     <button data-t="logs">📜 Logs</button>
     <button data-t="analytics">📊 Analytics</button>
     <button data-t="ablit">🔓 Abliterated</button>
+    <button data-t="operator">🧠 AI Operator</button>
   </nav>
   <button id="pageRefresh" title="Refresh THIS tab's data — no full browser reload" style="border-color:#2a5599;color:#7fb0ff;font-weight:700;font-size:1rem;padding:5px 11px">↻</button>
   <button id="helmUpdate" title="Update HELM from GitHub" style="border-color:#a371f755;color:#c9b6ff">⬆ update</button>
@@ -289,6 +290,7 @@
     <div style="display:flex;gap:8px;flex-wrap:wrap">
       <input id="missionText" placeholder="e.g. Ship the ORBEAN receipt-printing fix and document it" style="flex:1;min-width:220px;background:#080a0f;border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:9px 11px;font:inherit;font-size:.9rem">
       <select id="missionV" style="background:#080a0f;border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:9px;font:inherit"></select>
+      <span id="vAuto" title="local Gemma picks the venture from your text — click to accept, or just pick your own" style="font-size:.7rem;color:var(--dim);align-self:center;white-space:nowrap"></span>
       <button id="missionAttach" title="attach photos / videos / files">📎</button>
       <input type="file" id="missionFiles" multiple style="display:none">
       <button id="missionAdd" style="background:linear-gradient(135deg,var(--acc),var(--purple));border:none;color:#fff;font-weight:600;padding:9px 16px">🎯 Queue mission</button>
@@ -394,6 +396,11 @@
   <h2>Curated models <span class="sub">— verified on HuggingFace; one-click pull into Ollama</span></h2>
   <div class="grid" id="ablitCatalog">loading…</div>
 
+  <div id="ablitSuggestWrap" style="display:none;margin-top:10px">
+    <h2>🆕 Discovered since <span class="sub">— live HuggingFace check for newer abliterated models not in the curated list above; this is how the local fleet improves over time instead of staying frozen</span></h2>
+    <div class="grid" id="ablitSuggest"></div>
+  </div>
+
   <h2>🤗 HuggingFace search <span class="sub">— find any model; GGUF ones pull straight into Ollama</span></h2>
   <div class="panel" style="margin-bottom:6px">
     <div style="display:flex;gap:8px;flex-wrap:wrap">
@@ -417,6 +424,53 @@
       <span style="font-size:.72rem;color:var(--dim)">no key, no cloud — needs the model pulled + Ollama running</span>
     </div>
     <div id="ablitOut" style="margin-top:12px;font-size:.86rem;line-height:1.5;white-space:pre-wrap"></div>
+  </div>
+</section>
+
+<!-- ============ AI OPERATOR ============ -->
+<section data-tab="operator">
+  <h2 style="margin-top:6px">🧠 AI Operator <span class="sub">— a local, uncensored LLM runs HELM in your place: observes → decides → acts, unattended</span></h2>
+
+  <div class="panel" id="opMaster" style="border-color:#5a3fa9;margin-bottom:12px">
+    <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">
+      <button id="opToggle" style="border:none;color:#fff;font-weight:800;padding:12px 22px;border-radius:11px;font-size:1rem;cursor:pointer;background:linear-gradient(135deg,#238636,#2ea043)">▶ ENGAGE — full auto</button>
+      <button id="opKill" style="border:1px solid #a33;color:#ff6b6b;background:#1a0d0d;font-weight:700;padding:12px 18px;border-radius:11px;cursor:pointer">⏹ KILL SWITCH</button>
+      <button id="opTick" style="border:1px solid var(--line);background:var(--panel2);color:var(--ink);padding:12px 16px;border-radius:11px;cursor:pointer" title="run one observe→decide→act cycle right now">⚡ Think once now</button>
+      <div id="opStatus" style="font-size:.82rem;color:var(--dim);margin-left:auto">loading…</div>
+    </div>
+    <div style="font-size:.78rem;color:var(--ink);margin-top:11px;line-height:1.55">
+      <b>Full auto, no guardrails on its decisions.</b> The brain is your <b>abliterated / uncensored local model</b> (nothing leaves the PC). It can queue missions, unstick stalled work, start/stop the runner, switch executors &amp; failover, reprioritize — everything you'd do here. The only fixed things are what let you leave it running: it can invoke <b>only the actions in its vocabulary</b> (never a raw shell), every action is <b>logged below</b>, and the <b>kill switch</b> stops it in ≤2s.
+    </div>
+  </div>
+
+  <h2>Settings <span class="sub">— tune the loop</span></h2>
+  <div class="panel" style="margin-bottom:12px">
+    <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-end">
+      <label style="font-size:.78rem;color:var(--dim)">Brain model<br>
+        <select id="opModel" style="margin-top:4px;background:#080a0f;border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:7px 9px;font:inherit;font-size:.82rem;min-width:230px"></select></label>
+      <label style="font-size:.78rem;color:var(--dim)">Tick every (sec)<br>
+        <input id="opInterval" type="number" min="20" max="3600" style="margin-top:4px;width:90px;background:#080a0f;border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:7px 9px;font:inherit"></label>
+      <label style="font-size:.78rem;color:var(--dim)">Max actions / tick<br>
+        <input id="opMax" type="number" min="1" max="20" style="margin-top:4px;width:90px;background:#080a0f;border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:7px 9px;font:inherit"></label>
+      <label style="display:flex;gap:6px;align-items:center;font-size:.8rem;color:var(--dim);cursor:pointer">
+        <input type="checkbox" id="opCloud"> cloud fallback if Ollama is down</label>
+      <button id="opSave" style="border:1px solid var(--line);background:var(--panel2);color:var(--ink);padding:8px 15px;border-radius:9px;cursor:pointer">save</button>
+    </div>
+  </div>
+
+  <h2>Model ranking <span class="sub">— which brain is winning right now, from real outcomes (not a fixed list) · changes as models get better, worse, or newly appear</span></h2>
+  <div class="panel" style="margin-bottom:12px;overflow-x:auto">
+    <table><thead><tr><th>kind</th><th>model</th><th>score</th><th>samples</th><th>last call</th></tr></thead><tbody id="opRank"><tr><td colspan="5" style="color:var(--dim)">no track record yet — scores build up as the operator (or failover) actually uses each model</td></tr></tbody></table>
+  </div>
+
+  <h2>What it can do <span class="sub">— its whole vocabulary; the same surface external headless agents drive via <code style="background:#080a0f;padding:1px 5px;border-radius:4px">POST /api/agent/act</code></span></h2>
+  <div class="panel" style="margin-bottom:12px;overflow-x:auto">
+    <table><thead><tr><th>action</th><th>what it does</th></tr></thead><tbody id="opManifest"><tr><td colspan="2" style="color:var(--dim)">loading…</td></tr></tbody></table>
+  </div>
+
+  <h2>Action feed <span class="sub">— every decision the operator made, newest first (the audit log)</span></h2>
+  <div class="panel" style="overflow-x:auto"><table><thead><tr><th>when</th><th></th><th>action</th><th>why / result</th></tr></thead>
+    <tbody id="opAudit"><tr><td colspan="4" style="color:var(--dim)">no actions yet — engage it above</td></tr></tbody></table>
   </div>
 </section>
 
@@ -496,6 +550,7 @@ document.querySelectorAll('#tabs button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('section[data-tab]').forEach(s=>s.classList.toggle('act',s.dataset.tab===b.dataset.t));
   if(b.dataset.t==='analytics'){ renderChart(); pollGov(); pollProviders(false); pollModels(); }
   if(b.dataset.t==='ablit'){ pollAblit(); }
+  if(b.dataset.t==='operator'){ pollOperator(); }
 });
 /* in-page refresh: re-fetch the ACTIVE tab's data without a full browser reload */
 function refreshTab(){
@@ -509,6 +564,7 @@ function refreshTab(){
   else if(active==='logs') C('pollLogs','pollApprovalHistory');
   else if(active==='analytics') C('renderChart','pollGov','pollProviders','pollModels');
   else if(active==='ablit') C('pollAblit');
+  else if(active==='operator') C('pollOperator');
   const btn=document.getElementById('pageRefresh'); if(btn){ btn.style.transition='transform .4s'; btn.style.transform='rotate(360deg)'; setTimeout(()=>btn.style.transform='',420); }
   toast('↻ refreshed '+active);
 }
@@ -673,9 +729,30 @@ $('missionAdd').onclick=()=>{
   const txt=$('missionText').value.trim(); if(!txt&&!pendingFiles.length)return;
   state.tasks.push({id:''+Date.now()+Math.floor(Math.random()*1e4),text:txt||('mission with '+pendingFiles.length+' attachment(s)'),v:$('missionV').value,col:'backlog',mission:true,ts:Date.now(),files:pendingFiles});
   $('missionText').value=''; pendingFiles=[]; renderAttach(); saveState(); renderBoard(); renderGam();
+  try{ vUserPicked=false; $('vAuto').textContent=''; }catch(e){}
   toast('🎯 mission queued — run /mission in a Claude session to execute');
 };
 $('missionText').addEventListener('keydown',e=>{if(e.key==='Enter')$('missionAdd').click();});
+/* LOCAL auto-select: Gemma (Ollama) infers the venture from the mission text - free, on-device */
+let vAutoTimer=null, vUserPicked=false;
+$('missionV').addEventListener('change',()=>{ vUserPicked=true; $('vAuto').textContent='✋ you'; $('vAuto').style.color='var(--dim)'; });
+$('missionText').addEventListener('input',()=>{
+  clearTimeout(vAutoTimer);
+  const txt=$('missionText').value.trim();
+  if(!txt){ vUserPicked=false; $('vAuto').textContent=''; return; }
+  if(txt.length<8 || vUserPicked) return;
+  $('vAuto').style.color='var(--dim)'; $('vAuto').textContent='🤖 detecting…';
+  vAutoTimer=setTimeout(async()=>{
+    if(vUserPicked)return;
+    try{
+      const r=await (await fetch('/api/infer/venture',{method:'POST',body:JSON.stringify({text:txt})})).json();
+      if(vUserPicked)return;
+      if(r.venture && [...$('missionV').options].some(o=>o.value===r.venture)){
+        $('missionV').value=r.venture; $('vAuto').style.color='var(--grn)'; $('vAuto').textContent='🤖 '+r.venture;
+      } else { $('vAuto').style.color='var(--dim)'; $('vAuto').textContent = r.error ? '🤖 (start Ollama)' : ''; }
+    }catch(e){ $('vAuto').textContent=''; }
+  }, 900);
+});
 
 /* live board sync — agents update state.json server-side; reflect it without clobbering a drag */
 let lastStateHash='';
@@ -1584,6 +1661,17 @@ async function pollAblit(){
     $('ablitCatalog').querySelectorAll('.ablitPull').forEach(b=>b.onclick=()=>ablitPull(b.dataset.m));
     $('ablitCatalog').querySelectorAll('.ablitUse').forEach(b=>b.onclick=()=>{ const opt=[...$('ablitModel').options].find(o=>o.value.includes(b.dataset.m)); if(opt)$('ablitModel').value=opt.value; $('ablitPrompt').focus(); toast('using '+b.dataset.m); });
     $('ablitModel').innerHTML=s.local.length?s.local.map(n=>`<option>${esc(n)}</option>`).join(''):'<option value="">(pull a model first)</option>';
+    const sug=s.suggested||[];
+    $('ablitSuggestWrap').style.display=sug.length?'':'none';
+    $('ablitSuggest').innerHTML=sug.map(m=>`<div class="card">
+      <div class="t">${esc(m.id.split('/').pop())}</div>
+      <div class="d" style="font-size:.72rem;color:var(--dim)">${esc(m.id)}</div>
+      <div style="font-size:.68rem;color:#8b949e;margin-top:3px">↓${(m.downloads||0).toLocaleString()} downloads · ${(m.likes||0).toLocaleString()} likes</div>
+      <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;align-items:center">
+        <button class="ablitPull" data-m="hf.co/${esc(m.id)}:Q4_K_M" style="border-color:#a371f755;color:#c9b6ff">⬇ pull</button>
+        <a href="https://huggingface.co/${esc(m.id)}" target="_blank" rel="noopener" style="font-size:.72rem;color:#58a6ff">HF ↗</a>
+      </div></div>`).join('');
+    $('ablitSuggest').querySelectorAll('.ablitPull').forEach(b=>b.onclick=()=>ablitPull(b.dataset.m));
   }catch(e){ $('ablitCatalog').innerHTML='<span style="color:var(--dim)">unavailable</span>'; }
 }
 async function ablitPull(model){
@@ -1629,6 +1717,85 @@ $('ablitSend').onclick=async()=>{
   pollMode(); setInterval(pollMode,12000);
   pollVersion();
 })();
+/* ===== AI OPERATOR — a local uncensored LLM drives HELM on full auto ===== */
+let opBooted=false;
+async function pollOperator(){
+  try{
+    const [st,man,aud,rk]=await Promise.all([
+      fetch('/api/operator/status').then(r=>r.json()),
+      fetch('/api/agent/manifest').then(r=>r.json()),
+      fetch('/api/agent/audit').then(r=>r.json()),
+      fetch('/api/models/rank').then(r=>r.json()).catch(()=>({local:[],cloud:[]}))
+    ]);
+    renderOpStatus(st); renderOpManifest(man.actions||[]); renderOpAudit(aud.audit||[]); renderOpRank(rk);
+    if(!opBooted){ await fillOpModels(st); opBooted=true; }
+  }catch(e){}
+}
+function renderOpStatus(st){
+  if(!st) return; const on=!!st.running; const tg=$('opToggle');
+  tg.textContent=on?'⏸ Operating — click to pause':'▶ ENGAGE — full auto';
+  tg.style.background=on?'linear-gradient(135deg,#d29922,#b8860b)':'linear-gradient(135deg,#238636,#2ea043)';
+  tg.dataset.on=on?'1':'';
+  $('opStatus').innerHTML=(on?'<b style="color:var(--grn)">● LIVE</b>':'<span style="color:var(--dim)">○ idle</span>')
+    +` · brain <b>${esc(st.activeModel||'?')}</b> · every ${st.intervalSec}s · Ollama ${st.ollama?'<span style="color:var(--grn)">up</span>':'<span style="color:var(--amber)">down</span>'}`;
+  if(document.activeElement!==$('opInterval')) $('opInterval').value=st.intervalSec;
+  if(document.activeElement!==$('opMax')) $('opMax').value=st.maxActionsPerTick;
+  if(document.activeElement!==$('opCloud')) $('opCloud').checked=!!st.allowCloud;
+}
+function renderOpRank(rk){
+  const rows=[...(rk.local||[]).map(m=>({...m,kind:'local'})), ...(rk.cloud||[]).map(m=>({...m,kind:'cloud'}))];
+  if(!rows.length){ $('opRank').innerHTML='<tr><td colspan=5 style="color:var(--dim)">no track record yet — scores build up as the operator (or failover) actually uses each model</td></tr>'; return; }
+  rows.sort((a,b)=>b.score-a.score);
+  $('opRank').innerHTML=rows.map(m=>{
+    const bar=Math.round(m.score*100);
+    const color=m.score>=0.7?'var(--grn)':(m.score>=0.5?'var(--amber)':'var(--red)');
+    return `<tr><td style="color:var(--dim);text-transform:uppercase;font-size:.68rem">${m.kind}</td><td><code>${esc(m.model)}</code></td>
+      <td><div style="display:flex;align-items:center;gap:6px"><div style="width:60px;height:6px;background:#1b2130;border-radius:3px;overflow:hidden"><div style="width:${bar}%;height:100%;background:${color}"></div></div><span style="font-size:.75rem;color:${color}">${bar}%</span></div></td>
+      <td style="font-size:.78rem;color:var(--dim)">${m.samples||0}</td>
+      <td>${m.lastOk===null||m.lastOk===undefined?'<span style="color:var(--dim)">—</span>':(m.lastOk?'<span style="color:var(--grn)">✓ ok</span>':'<span style="color:var(--red)">✗ failed</span>')}</td></tr>`;
+  }).join('');
+}
+async function fillOpModels(st){
+  let tags=[]; try{ tags=(await (await fetch('/api/ablit/state')).json()).local||[]; }catch(e){}
+  const cur=(st&&st.model)||'auto'; const opts=['auto',...tags];
+  $('opModel').innerHTML=opts.map(o=>`<option value="${esc(o)}"${o===cur?' selected':''}>${o==='auto'?'auto — prefer abliterated':esc(o)}</option>`).join('');
+}
+function renderOpManifest(acts){
+  $('opManifest').innerHTML=acts.length?acts.map(a=>`<tr><td><code style="color:#a371f7">${esc(a.action)}</code></td><td style="font-size:.8rem">${esc(a.desc)}</td></tr>`).join(''):'<tr><td colspan=2 style="color:var(--dim)">—</td></tr>';
+}
+function renderOpAudit(rows){
+  if(!rows||!rows.length){ $('opAudit').innerHTML='<tr><td colspan=4 style="color:var(--dim)">no actions yet — engage it above</td></tr>'; return; }
+  $('opAudit').innerHTML=rows.map(r=>{
+    const t=new Date(r.ts||Date.now()), hh=t.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+    const ico=r.ok===false?'❌':(String(r.action).startsWith('(')?'💭':'✅');
+    const detail=esc(r.why||r.msg||r.error||'');
+    return `<tr><td style="color:var(--dim);white-space:nowrap;font-size:.72rem">${hh}</td><td>${ico}</td><td><code style="color:#a371f7">${esc(r.action)}</code></td><td style="font-size:.8rem">${detail}${r.model?` <span style="color:var(--dim);font-size:.68rem">· ${esc(r.model)}</span>`:''}</td></tr>`;
+  }).join('');
+}
+$('opToggle').onclick=async()=>{
+  const on=$('opToggle').dataset.on==='1';
+  try{ const r=await (await fetch(on?'/api/operator/stop':'/api/operator/start',{method:'POST'})).json();
+    toast(on?'operator paused':'🧠 operator ENGAGED — full auto'); renderOpStatus(r);
+    setTimeout(pollOperator, on?400:1600);
+  }catch(e){ toast('failed'); }
+};
+$('opKill').onclick=async()=>{
+  try{ const r=await (await fetch('/api/operator/stop',{method:'POST'})).json(); toast('⏹ killed — operator stopped'); renderOpStatus(r); }catch(e){}
+  pollOperator();
+};
+$('opTick').onclick=async()=>{
+  $('opTick').disabled=true; const lbl=$('opTick').textContent; $('opTick').textContent='⚡ thinking…';
+  try{ const r=await (await fetch('/api/operator/tick',{method:'POST'})).json();
+    toast(r.ok?`⚡ ${r.decided} action(s) via ${r.model||'?'}`:('tick: '+((r.error||'?').slice(0,60))));
+  }catch(e){ toast('tick failed'); }
+  $('opTick').disabled=false; $('opTick').textContent=lbl; setTimeout(pollOperator,600);
+};
+$('opSave').onclick=async()=>{
+  const body={model:$('opModel').value,intervalSec:+$('opInterval').value||90,maxActionsPerTick:+$('opMax').value||5,allowCloud:$('opCloud').checked};
+  try{ const r=await (await fetch('/api/operator/config',{method:'POST',body:JSON.stringify(body)})).json(); toast('⚙ settings saved'); renderOpStatus(r); }catch(e){ toast('save failed'); }
+};
+/* keep the feed live only while the Operator tab is open */
+setInterval(()=>{ if(document.querySelector('#tabs button.act')?.dataset.t==='operator') pollOperator(); }, 5000);
 </script>
 
 <!-- API/login error wizard -->

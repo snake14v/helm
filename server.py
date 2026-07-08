@@ -1,7 +1,7 @@
 # Mission Control server - stdlib only, no deps. Serves the dashboard + live APIs.
 # Run: python server.py   ->  http://localhost:8799
 # APIs: /api/summary (token usage), /api/workflows (runs), /api/services (health), /api/state (kanban/ratings, GET/POST)
-import json, os, re, shutil, threading, time, urllib.request
+import difflib, json, os, re, shutil, tempfile, threading, time, urllib.request
 import doctor as doctor_mod
 import nba as nba_mod
 import agents_hq
@@ -15,6 +15,8 @@ import taskhealth as taskhealth_mod
 import llm_providers as llm_mod
 import apihealth as apihealth_mod
 import ablit as ablit_mod
+import aiop as aiop_mod
+import model_rank as model_rank_mod
 from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -22,6 +24,7 @@ from pathlib import Path
 ROOT = Path(__file__).parent
 PROJECTS = Path.home() / ".claude" / "projects"
 STATE_FILE = ROOT / "state.json"
+_state_lock = threading.RLock()   # serialize state.json read-modify-write (operator loop vs request threads)
 CACHE_FILE = ROOT / "usage-cache.json"
 PORT = 8799
 
@@ -275,14 +278,11 @@ def running_progress():
 RUNTIME = os.path.join(os.path.dirname(os.path.abspath(__file__)), "runtime.json")
 
 def _runtime():
-    try:
-        return json.loads(open(RUNTIME, encoding="utf-8").read())
-    except Exception:
-        return {}
+    return aiop_mod.read_runtime()   # shared lock + atomic writer live in aiop (one owner of runtime.json)
 
 def _set_runtime(**kv):
-    d = _runtime(); d.update(kv)
-    open(RUNTIME, "w", encoding="utf-8").write(json.dumps(d, indent=1))
+    with aiop_mod.RT_LOCK:           # locked read-modify-write so the operator loop can't lose our update
+        d = aiop_mod.read_runtime(); d.update(kv); aiop_mod.write_runtime(d)
     return d
 
 def runner_health():
@@ -539,18 +539,262 @@ def services():
 
 # ---------------- state (kanban + ratings + xp events) ----------------
 def load_state():
-    try:
-        return json.loads(STATE_FILE.read_text(encoding="utf-8"))
-    except Exception:
-        return {"tasks": [], "ratings": [], "events": []}
+    with _state_lock:
+        try:
+            return json.loads(STATE_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            return {"tasks": [], "ratings": [], "events": []}
 
 def save_state(s):
-    if STATE_FILE.exists():
+    data = json.dumps(s, indent=1)
+    with _state_lock:
+        if STATE_FILE.exists():
+            try:
+                shutil.copy(STATE_FILE, STATE_FILE.with_suffix(".json.bak"))  # doctor restores from this
+            except Exception:
+                pass
+        # atomic write (tmp + os.replace): a crash mid-write can never leave a torn/empty state.json
+        fd, tmp = tempfile.mkstemp(dir=str(ROOT), suffix=".state.tmp")
         try:
-            shutil.copy(STATE_FILE, STATE_FILE.with_suffix(".json.bak"))  # doctor restores from this
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(data)
+            os.replace(tmp, STATE_FILE)
         except Exception:
-            pass
-    STATE_FILE.write_text(json.dumps(s, indent=1), encoding="utf-8")
+            try: os.remove(tmp)
+            except Exception: pass
+            raise
+
+# ---------------- AI operator: sense + act (drives HELM programmatically) ----------------
+# build_snapshot = what the operator SENSES each tick; agent_act = the ONE dispatcher every
+# programmatic control (the autonomous loop, external headless LLMs, /api/agent/act) routes through.
+def build_snapshot():
+    """Compact, decision-relevant world state for the AI operator (and any external agent)."""
+    s = load_state(); tasks = s.get("tasks", [])
+    def lite(t):
+        return {"id": t.get("id"), "text": (t.get("text") or "")[:120], "v": t.get("v"),
+                "col": t.get("col"), "status": (t.get("status") or "")[:70]}
+    missions = [t for t in tasks if t.get("mission")]
+    backlog = [lite(t) for t in missions if t.get("col") == "backlog"]
+    inflight = [lite(t) for t in missions if t.get("col") in ("doing", "review")]
+    stuck = [lite(t) for t in missions if t.get("broken") or "blocked" in (t.get("status") or "").lower()
+             or (t.get("runnerAttempts") or 0) >= 2]
+    nowms = int(time.time() * 1000)
+    recent_done = [lite(t) for t in missions if t.get("col") == "done"
+                   and nowms - (t.get("doneTs") or t.get("ts") or 0) <= 30 * 60 * 1000]
+    rt = _runtime()
+    # taskhealth is state-only (fast). Everything here MUST stay cheap - this runs every tick, so it
+    # deliberately AVOIDS the NBA/mood/work pipeline (git across every repo + usage scans = 15s+).
+    try:
+        th = taskhealth_mod.classify(s).get("counts", {})
+    except Exception:
+        th = {}
+    try:
+        cloud = llm_mod.available()
+    except Exception:
+        cloud = []
+    return {
+        "ventures": [{"id": v["id"], "what": v.get("what", "")} for v in load_config().get("ventures", [])],
+        "counts": {"backlog": len(backlog), "inflight": len(inflight), "stuck": len(stuck),
+                   "done": len([t for t in missions if t.get("col") == "done"])},
+        "backlog": backlog[:12], "inflight": inflight[:12], "stuck": stuck[:12],
+        "recentDone": recent_done[:12],
+        "runner": runner_health(),
+        "executor": rt.get("executor", "claude"), "mode": rt.get("mode", "manual"),
+        "autoFailover": bool(rt.get("autoFailover", True)),
+        "cloudProviders": cloud, "claudeReady": bool(llm_mod._key("CLAUDE_CODE_OAUTH_TOKEN")),
+        "taskHealth": th, "hour": time.localtime().tm_hour, "ts": int(time.time() * 1000),
+    }
+
+def _mission_dupe(text, venture, tasks, nowms, window_ms=30 * 60 * 1000, ratio_thresh=0.6):
+    """Id of an existing mission that's a near-duplicate of `text` for the same venture - checked
+    against backlog/doing/review (still live) and done in the last `window_ms` (just-finished work
+    a small local operator model has no other way to see). Structural guard so a runaway operator
+    loop can't re-queue the same mission forever even if its prompt reasoning fails (2026-07-08)."""
+    norm = text.strip().lower()
+    for t in tasks:
+        if not t.get("mission"):
+            continue
+        tv = t.get("v") or ""
+        if venture and tv and tv != venture:
+            continue
+        col = t.get("col")
+        if col == "done":
+            if nowms - (t.get("doneTs") or t.get("ts") or 0) > window_ms:
+                continue
+        elif col not in ("backlog", "doing", "review"):
+            continue
+        other = (t.get("text") or "").strip().lower()
+        if not other:
+            continue
+        if difflib.SequenceMatcher(None, norm, other).ratio() >= ratio_thresh:
+            return t.get("id")
+    return None
+
+def _venture_busy(venture, tasks, nowms, cooldown_ms=20 * 60 * 1000):
+    """True if `venture` already has a pending mission, or one finished too recently to justify
+    inventing another. Text-similarity dedup alone is gameable by rewording (proven 2026-07-08: a
+    reworded near-duplicate scored 0.556, just under the 0.6 threshold, and ran a SECOND real
+    headless Claude session investigating the same thing 31s after the first was queued) - this is
+    a rate-limit that doesn't depend on wording at all: at most one pending/just-done mission per
+    venture invented by the operator at a time, full stop."""
+    if not venture:
+        return False
+    for t in tasks:
+        if not t.get("mission") or (t.get("v") or "") != venture:
+            continue
+        col = t.get("col")
+        if col in ("backlog", "doing", "review"):
+            return True
+        if col == "done" and nowms - (t.get("doneTs") or t.get("ts") or 0) <= cooldown_ms:
+            return True
+    return False
+
+def agent_act(action, params, actor="external"):
+    """The ONE dispatcher for programmatic HELM control. Whitelisted vocabulary only (see aiop.MANIFEST);
+    each branch reuses the same effect a UI button triggers. Never runs arbitrary shell. Mission TEXT is
+    stored verbatim (the headless path references it by id, not text); on the FAILOVER path the runner +
+    agent-failover.ps1 neutralize the double-quote before it reaches a child-process argv (Review 2026-07-08)."""
+    a = (action or "").lower().strip(); p = params or {}
+    base = os.path.dirname(RUNTIME); nowms = int(time.time() * 1000)
+    _state_lock.acquire()   # whole load->mutate->save is one critical section (vs the loop thread / UI POSTs)
+    try:
+        if a == "queue_mission":
+            text = str(p.get("text") or "").strip()[:1000]
+            if not text:
+                return {"ok": False, "error": "empty mission text"}
+            v = str(p.get("venture") or p.get("v") or "").strip()
+            if v and v not in {x.get("id") for x in load_config().get("ventures", [])}:
+                v = ""
+            s = load_state(); s.setdefault("tasks", [])
+            dupe = _mission_dupe(text, v, s["tasks"], nowms)
+            if dupe:
+                return {"ok": False, "error": f"duplicate of existing/recently-completed mission {dupe} - not queuing"}
+            if v and _venture_busy(v, s["tasks"], nowms):
+                return {"ok": False, "error": f"venture '{v}' already has a pending mission or one finished "
+                        "within the last 20 min - not inventing more yet"}
+            tid = f"{nowms}{len(s['tasks'])}"
+            s["tasks"].insert(0, {"id": tid, "text": text, "v": v or None, "col": "backlog",
+                                  "mission": True, "ts": nowms, "by": actor, "status": "queued by AI operator"})
+            save_state(s)
+            return {"ok": True, "id": tid, "msg": f"queued mission for {v or 'no venture'}"}
+        if a == "mission_act":
+            mid, act = p.get("id"), (p.get("act") or "").lower()
+            s = load_state(); tk = next((t for t in s.get("tasks", []) if t.get("id") == mid), None)
+            if not tk:
+                return {"ok": False, "error": "mission not found"}
+            if act == "check":
+                tk["col"] = "done"; tk["status"] = "verified & done (AI operator)"; tk["doneTs"] = nowms
+            elif act == "boost":
+                tk["col"] = "backlog"; tk["runnerAttempts"] = 0; tk["boosted"] = True
+                s["tasks"] = [tk] + [t for t in s["tasks"] if t.get("id") != mid]; tk["status"] = "boosted - next in queue"
+            elif act == "rethink":
+                tk["col"] = "backlog"; tk["runnerAttempts"] = 0; tk["replan"] = True; tk["status"] = "re-plan requested"
+            elif act == "broken":
+                tk["col"] = "backlog"; tk["broken"] = True; tk["status"] = "BROKEN - flagged by AI operator"
+            else:
+                return {"ok": False, "error": "act must be check|boost|rethink|broken"}
+            save_state(s); return {"ok": True, "msg": f"{act} applied"}
+        if a == "heal_mission":
+            mid = p.get("id")
+            tk = next((t for t in load_state().get("tasks", []) if t.get("id") == mid), None)
+            if not tk:
+                return {"ok": False, "error": "mission not found"}
+            h = runner_health()
+            if h["state"] != "polling" and tk.get("col") == "backlog":
+                try:
+                    os.startfile(os.path.join(base, "restart-runner-hidden.vbs"))
+                    return {"ok": True, "msg": f"runner was {h['state']} - restarted it"}
+                except Exception as e:
+                    return {"ok": False, "error": f"could not restart runner: {e}"}
+            return {"ok": True, "msg": f"no structural fix needed (runner {h['state']}, col {tk.get('col')})"}
+        if a == "move_task":
+            mid, col = p.get("id"), (p.get("col") or "").lower()
+            if col not in ("backlog", "doing", "review", "done"):
+                return {"ok": False, "error": "col must be backlog|doing|review|done"}
+            s = load_state(); tk = next((t for t in s.get("tasks", []) if t.get("id") == mid), None)
+            if not tk:
+                return {"ok": False, "error": "task not found"}
+            # STRUCTURAL guard (Review 2026-07-08): don't let a raw move_task silently revive a
+            # mission that's actually done WITH a real report attached - the operator did exactly
+            # this ("stuck... moving to backlog") on a mission that had already finished with a
+            # report, which would re-trigger the runner into re-executing already-completed work.
+            # A genuine "this needs redoing" call belongs to mission_act's rethink/broken (explicit
+            # intent), not a bare column move.
+            if tk.get("col") == "done" and col != "done" and tk.get("report"):
+                return {"ok": False, "error": "task is done with a report attached - use mission_act "
+                        "(rethink/broken) if it genuinely needs redoing, not a raw column move"}
+            tk["col"] = col; save_state(s); return {"ok": True, "msg": f"moved to {col}"}
+        if a == "delete_task":
+            mid = p.get("id"); s = load_state(); n0 = len(s.get("tasks", []))
+            s["tasks"] = [t for t in s.get("tasks", []) if t.get("id") != mid]
+            if len(s["tasks"]) == n0:
+                return {"ok": False, "error": "task not found"}
+            save_state(s); return {"ok": True, "msg": "deleted"}
+        if a == "task_settings":
+            mid = p.get("id"); inc = p.get("settings") or {}
+            s = load_state(); tk = next((t for t in s.get("tasks", []) if t.get("id") == mid), None)
+            if not tk:
+                return {"ok": False, "error": "task not found"}
+            cur = dict(tk.get("settings") or {})
+            if "mode" in inc: cur["mode"] = "auto" if str(inc["mode"]).lower() == "auto" else "manual"
+            if "executor" in inc: cur["executor"] = "failover" if str(inc["executor"]).lower() == "failover" else "claude"
+            if "promptAddon" in inc: cur["promptAddon"] = str(inc["promptAddon"] or "")[:2000]
+            if "maxAttempts" in inc:
+                try: cur["maxAttempts"] = max(1, min(9, int(inc["maxAttempts"])))
+                except Exception: pass
+            tk["settings"] = cur; save_state(s); return {"ok": True, "settings": cur}
+        if a == "set_mode":
+            mode = (p.get("mode") or "").lower()
+            if mode not in ("auto", "manual"):
+                return {"ok": False, "error": "mode must be auto|manual"}
+            try: os.startfile(os.path.join(base, "restart-runner-hidden.vbs" if mode == "auto" else "stop-runner-hidden.vbs"))
+            except Exception: pass
+            _set_runtime(mode=mode, autoFailover=(mode == "auto"))
+            try: approvals_mod.set_auto(mode == "auto")
+            except Exception: pass
+            return {"ok": True, "msg": f"mode -> {mode}"}
+        if a == "set_executor":
+            ex = (p.get("executor") or "").lower()
+            if ex not in ("claude", "failover"):
+                return {"ok": False, "error": "executor must be claude|failover"}
+            _set_runtime(executor=ex); return {"ok": True, "msg": f"executor -> {ex}"}
+        if a == "set_failover":
+            auto = bool(p.get("auto")); _set_runtime(autoFailover=auto)
+            return {"ok": True, "msg": f"auto-failover {'ON' if auto else 'OFF'}"}
+        if a == "runner":
+            act = (p.get("action") or "").lower()
+            vbs = {"start": "restart-runner-hidden.vbs", "restart": "restart-runner-hidden.vbs",
+                   "stop": "stop-runner-hidden.vbs"}.get(act)
+            if not vbs:
+                return {"ok": False, "error": "action must be start|stop|restart"}
+            # STRUCTURAL guard (Review 2026-07-08): the operator kept restarting an ALREADY-HEALTHY
+            # runner every tick ("preventative measure" reasoning) - a prompt rule alone didn't stop
+            # it, so block a no-op restart/start here regardless of what any LLM decides. A restart
+            # that would actually kill in-flight work is exactly the failure mode this prevents. The
+            # human's own dashboard button hits a separate endpoint (path0=="/api/runner") and is
+            # NEVER blocked by this - only programmatic callers (agent_act) are gated.
+            if act in ("start", "restart") and runner_health().get("state") == "polling":
+                return {"ok": False, "error": "runner is already healthy (polling) - restart not needed"}
+            os.startfile(os.path.join(base, vbs)); return {"ok": True, "msg": f"runner {act}"}
+        if a == "pin_nba":
+            op, key = p.get("op"), p.get("key"); pins = list(_runtime().get("nbaPins", []))
+            if op == "toggle" and key:
+                pins.remove(key) if key in pins else pins.append(key)
+            elif op in ("up", "down") and key in pins:
+                i = pins.index(key); j = i - 1 if op == "up" else i + 1
+                if 0 <= j < len(pins): pins[i], pins[j] = pins[j], pins[i]
+            elif op == "clear":
+                pins = []
+            else:
+                return {"ok": False, "error": "op must be toggle|up|down|clear"}
+            _set_runtime(nbaPins=pins); return {"ok": True, "pins": pins}
+        if a == "note":
+            return {"ok": True, "msg": "noted"}
+        return {"ok": False, "error": f"unknown action '{a}'"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:200]}
+    finally:
+        _state_lock.release()
 
 # ---------------- http ----------------
 class H(BaseHTTPRequestHandler):
@@ -636,6 +880,20 @@ class H(BaseHTTPRequestHandler):
             return self._json(load_config())
         if p == "/api/version":
             return self._json(helm_version())
+        if p == "/api/agent/manifest":
+            # the action vocabulary any LLM (built-in operator OR an external headless agent) can invoke.
+            return self._json({"actions": aiop_mod.MANIFEST,
+                               "note": "POST /api/agent/act {action, params} to drive HELM. GET /api/agent/observe for state."})
+        if p == "/api/agent/observe":
+            return self._json(build_snapshot())
+        if p == "/api/agent/audit":
+            return self._json({"audit": aiop_mod.audit(80)})
+        if p == "/api/operator/status":
+            return self._json(aiop_mod.status())
+        if p == "/api/models/rank":
+            # transparency for the "query best LLMs, adapt over time" ranking - not a fixed opinion,
+            # a live record of what's actually been working (see model_rank.py).
+            return self._json({"local": model_rank_mod.snapshot("local"), "cloud": model_rank_mod.snapshot("cloud")})
         if p == "/api/music":
             rt = _runtime().get("music", {})
             return self._json({"artist": rt.get("artist", "auto"), "autoMood": rt.get("autoMood", True),
@@ -1088,6 +1346,42 @@ class H(BaseHTTPRequestHandler):
                 return self._json({"ok": True, "msg": f"pulling {model} in a terminal - watch its progress there, then it appears as 'pulled'."})
             except Exception as e:
                 return self._json({"ok": False, "error": str(e)}, 400)
+        if path0 == "/api/infer/venture":
+            # LOCAL inference (Gemma via Ollama) to auto-pick the venture for a mission - free, on-device.
+            n = int(self.headers.get("Content-Length", 0))
+            try:
+                text = (json.loads(self.rfile.read(n)) if n else {}).get("text", "")
+                vents = [{"id": v["id"], "label": v.get("name", ""), "desc": v.get("what", "")}
+                         for v in load_config().get("ventures", [])]
+                return self._json(ablit_mod.classify(text, vents) or {"venture": None})
+            except Exception as e:
+                return self._json({"venture": None, "error": str(e)}, 400)
+        if path0 == "/api/agent/act":
+            # PROGRAMMATIC control - the surface a headless LLM uses to operate HELM in your place.
+            # {action, params} routed through the ONE whitelisted dispatcher (aiop.MANIFEST vocabulary).
+            n = int(self.headers.get("Content-Length", 0))
+            try:
+                b = json.loads(self.rfile.read(n)) if n else {}
+                return self._json(agent_act(b.get("action", ""), b.get("params") or {},
+                                            actor=b.get("actor", "external")))
+            except Exception as e:
+                return self._json({"ok": False, "error": str(e)}, 400)
+        if path0 in ("/api/operator/start", "/api/operator/stop", "/api/operator/tick", "/api/operator/config"):
+            # the built-in autonomous loop: start = engage full-auto, stop = KILL SWITCH,
+            # tick = think-once now, config = set model/interval/maxActionsPerTick.
+            n = int(self.headers.get("Content-Length", 0))
+            try:
+                b = json.loads(self.rfile.read(n)) if n else {}
+                if path0.endswith("start"):
+                    return self._json(aiop_mod.start())
+                if path0.endswith("stop"):
+                    return self._json(aiop_mod.stop())
+                if path0.endswith("tick"):
+                    return self._json(aiop_mod.tick())
+                aiop_mod.set_cfg(**{k: b[k] for k in ("model", "intervalSec", "maxActionsPerTick", "allowCloud") if k in b})
+                return self._json(aiop_mod.status())
+            except Exception as e:
+                return self._json({"ok": False, "error": str(e)}, 400)
         if path0 == "/api/ablit/chat":
             # run ONE local turn (text or vision) against a pulled abliterated model. All local.
             n = int(self.headers.get("Content-Length", 0))
@@ -1219,5 +1513,12 @@ if __name__ == "__main__":
         raise SystemExit(0)
     _load_cache()
     threading.Thread(target=_scan, daemon=True).start()
+    # AI operator: inject sense+act hooks; resume the autonomous loop if it was left engaged.
+    aiop_mod.set_hooks(build_snapshot, agent_act)
+    if aiop_mod.cfg().get("enabled"):
+        try:
+            aiop_mod.start(); print("AI operator resumed (was engaged) - full auto")
+        except Exception as e:
+            print("AI operator resume failed:", e)
     print(f"Mission Control -> http://localhost:{PORT}  (first usage scan runs in background)")
     srv.serve_forever()

@@ -14,6 +14,12 @@ param(
   [switch]$TestMode
 )
 $ErrorActionPreference = 'Continue'
+# SECURITY (Review 2026-07-08, CONFIRMED critical): $Prompt carries attacker/LLM-controlled mission
+# text. Below it is hand-quoted into child-process argv (claude -p "$Prompt", codex exec "$cxPrompt").
+# A double-quote closes that token; for the codex.cmd BATCH shim (launched via cmd.exe) a following
+# & / | then runs ARBITRARY OS commands outside HELM. Neutralize the quote + collapse newlines at this
+# single choke point so EVERY caller is covered (matches the mission-runner $addon sanitizer).
+$Prompt = ("$Prompt" -replace '"', "'" -replace '[\r\n]+', ' ').Trim()
 $root = $PSScriptRoot
 $logDir = Join-Path $root "failover-logs"; New-Item -ItemType Directory -Force $logDir | Out-Null
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'

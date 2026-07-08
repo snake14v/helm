@@ -85,12 +85,16 @@ while ($true) {
         }
         # Executor: per-task settings.executor wins; else the global runtime.json executor.
         # 'failover' routes through the Claude->Codex->cloud->Gemma chain; default = headless Claude.
+        # SECURITY (Review 2026-07-08): mission text is attacker/LLM-controllable (queue_mission stores
+        # it raw). Neutralize the double-quote + newlines BEFORE it enters a child-process argv on the
+        # failover path (agent-failover hand-quotes it into claude -p / codex exec). Same rule as $addon.
+        $safeText = ("$($m.text)" -replace '"', "'" -replace '[\r\n]+', ' ').Trim()
         $executor = 'claude'
         if ($m.settings -and $m.settings.executor) { $executor = "$($m.settings.executor)".ToLower() }
         else { try { $rt = Get-Content (Join-Path $PSScriptRoot 'runtime.json') -Raw -EA Stop | ConvertFrom-Json; if ($rt.executor) { $executor = "$($rt.executor)".ToLower() } } catch {} }
         if ($executor -eq 'failover') {
           Log "executor=failover -> routing mission to agent-failover chain (Claude->Codex->Gemma)"
-          $foPrompt = "Execute mission '$($m.text)'.$addon When done, write a report to reports\$($m.id).md and POST {id:'$($m.id)',col:'done',report:'/reports/$($m.id).md'} to $api/api/job."
+          $foPrompt = "Execute mission '$safeText'.$addon When done, write a report to reports\$($m.id).md and POST {id:'$($m.id)',col:'done',report:'/reports/$($m.id).md'} to $api/api/job."
           $fo = & "$PSScriptRoot\agent-failover.ps1" -Prompt $foPrompt -Cwd $PSScriptRoot -Mission $m.id 2>&1 | Select-Object -Last 1
           Log "failover result: $fo"
           if ($Once) { break }
@@ -114,7 +118,7 @@ while ($true) {
         if ($claudeText -match 'out of usage credits|usage-credits|rate.?limit|\b429\b|quota (?:exceeded|reached)|overloaded_error') {
           Log "Claude EXHAUSTED on this mission - invoking agent-failover chain (Codex -> Gemma)"
           $fo = & "$PSScriptRoot\agent-failover.ps1" -Mission $m.id -Cwd $PSScriptRoot `
-                -Prompt "Execute mission '$($m.text)'. When done, write a report to reports\$($m.id).md and POST {id:'$($m.id)',col:'done',report:'/reports/$($m.id).md'} to $api/api/job." 2>&1 | Select-Object -Last 1
+                -Prompt "Execute mission '$safeText'. When done, write a report to reports\$($m.id).md and POST {id:'$($m.id)',col:'done',report:'/reports/$($m.id).md'} to $api/api/job." 2>&1 | Select-Object -Last 1
           Log "failover result: $fo"
           $code = 0  # failover owns the outcome + board status from here
         }
