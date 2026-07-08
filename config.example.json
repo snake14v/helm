@@ -1,0 +1,9 @@
+{
+  "_comment": "Copy this to config.json and edit it for your machine. config.json is git-ignored (stays private). Each venture: id (lowercase key), name (shown), color (hex), dir (absolute path to the project on THIS PC), what (one line). Colors are scannable per-venture; pick any hex. The 'infra' venture should point at this HELM folder.",
+  "user": "your-name",
+  "ventures": [
+    { "id": "project1", "name": "My First Project", "color": "#1f6feb", "dir": "C:\\Users\\YOU\\project1",   "what": "what this project is" },
+    { "id": "project2", "name": "Second Project",   "color": "#3fb950", "dir": "C:\\Users\\YOU\\project2",   "what": "what this project is" },
+    { "id": "infra",    "name": "infra",            "color": "#8b949e", "dir": "C:\\Users\\YOU\\Desktop\\automation\\mission-control", "what": "HELM itself + automation" }
+  ]
+}

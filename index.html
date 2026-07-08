@@ -1,0 +1,1744 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HELM · Mission Control</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+  :root{
+    color-scheme:dark;
+    --bg:#05070a; --panel:#0d1119; --panel2:#131826; --line:#1b2130; --hair:#232a3d;
+    --ink:#e8ecf1; --dim:#6b7688; --faint:#3d4457;
+    --acc:#22d3ee;      /* cyan — live / informational */
+    --grn:#3ddc84;       /* phosphor green — success / done */
+    --amber:#ffb020;     /* amber — needs you / warn */
+    --red:#ff4d4f;        /* CRT red — danger / blocked */
+    --purple:#8b7fff;   /* violet — rare, agent-identity */
+    --disp:'Space Grotesk',ui-sans-serif,system-ui,sans-serif;
+    --body:'IBM Plex Sans',ui-sans-serif,system-ui,"Segoe UI",Roboto,sans-serif;
+    --mono:'IBM Plex Mono',ui-monospace,"Cascadia Code",Consolas,monospace;
+  }
+  *{box-sizing:border-box;} html,body{margin:0;}
+  body{background:
+      linear-gradient(var(--line) 1px,transparent 1px) 0 0/100% 26px,
+      linear-gradient(90deg,var(--line) 1px,transparent 1px) 0 0/26px 100%,
+      var(--bg);
+    background-attachment:fixed; background-blend-mode:normal;
+    color:var(--ink); font-family:var(--body); line-height:1.5; font-size:14px;
+  }
+  body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
+    background-image:linear-gradient(var(--line) 1px,transparent 1px),linear-gradient(90deg,var(--line) 1px,transparent 1px);
+    background-size:26px 26px; opacity:.06;}
+  code,.mono{font-family:var(--mono); font-variant-numeric:tabular-nums;}
+  header{position:sticky;top:0;z-index:5;background:rgba(5,7,10,.92);backdrop-filter:blur(10px);border-bottom:1px solid var(--line);padding:11px 20px;display:flex;flex-wrap:wrap;gap:12px;align-items:center;box-shadow:0 1px 0 rgba(255,176,32,.08);}
+  header h1{font-family:var(--disp);font-weight:700;font-size:1.05rem;margin:0;letter-spacing:.01em;} header h1 span{color:var(--dim);font-weight:400;font-family:var(--body);}
+  nav{display:flex;gap:4px;flex-wrap:wrap;}
+  nav button{font-family:var(--body);border:1px solid transparent;background:none;color:var(--dim);padding:6px 13px;border-radius:3px;font-size:.83rem;}
+  nav button.act{background:var(--panel2);border-color:var(--hair);color:var(--ink);font-weight:600;box-shadow:inset 0 1px 0 rgba(255,176,32,.15);border-top:1px solid rgba(255,176,32,.4);}
+  .svc{display:flex;gap:10px;margin-left:auto;flex-wrap:wrap;align-items:center;font-size:.72rem;color:var(--dim);font-family:var(--mono);}
+  .svc b{color:var(--ink);font-weight:500;}
+  .dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--dim);margin-right:5px;vertical-align:1px;}
+  .dot.up{background:var(--grn);box-shadow:0 0 5px var(--grn);} .dot.down{background:var(--red);}
+  main{max-width:min(2000px,96vw);margin:0 auto;padding:22px 24px 90px;position:relative;z-index:1;}
+  /* the kanban is 4 columns - let it use (almost) the whole desktop, not a centred 2000px strip */
+  main:has(section[data-tab="board"].act){max-width:min(2560px,98vw);}
+  @media(min-width:1500px){ .grid{grid-template-columns:repeat(auto-fill,minmax(300px,1fr));} }
+  @media(min-width:2100px){ .grid{grid-template-columns:repeat(auto-fill,minmax(330px,1fr));} }
+  section[data-tab]{display:none;} section.act{display:block;}
+  h2{font-family:var(--disp);font-size:.72rem;font-weight:600;text-transform:uppercase;letter-spacing:.1em;color:var(--dim);margin:28px 0 10px;padding-bottom:8px;border-bottom:1px solid var(--line);}
+  h2 .sub{text-transform:none;letter-spacing:0;font-weight:400;font-family:var(--body);}
+  .row{display:grid;gap:14px;} .hero{grid-template-columns:1.35fr 1fr;}
+  @media(max-width:900px){.hero{grid-template-columns:1fr;}}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:16px 18px;position:relative;
+    background-image:linear-gradient(var(--line) 1px,transparent 1px),linear-gradient(90deg,var(--line) 1px,transparent 1px);
+    background-size:24px 24px; background-position:-1px -1px;}
+  .panel::before{content:'';position:absolute;top:-1px;left:-1px;width:22px;height:2px;background:var(--amber);box-shadow:0 0 6px rgba(255,176,32,.6);}
+  .panel::after{content:'';position:absolute;top:-1px;left:-1px;width:2px;height:22px;background:var(--amber);box-shadow:0 0 6px rgba(255,176,32,.6);}
+  /* gamify */
+  .gam{display:flex;gap:18px;align-items:center;flex-wrap:wrap;}
+  .lvlring{width:74px;height:74px;flex:none;position:relative;}
+  .lvlring svg{transform:rotate(-90deg);}
+  .lvlring .n{position:absolute;inset:0;display:grid;place-items:center;font-family:var(--mono);font-weight:600;font-size:1.25rem;}
+  .gam .meta{min-width:150px;} .gam .meta .t{font-family:var(--disp);font-weight:700;}
+  .xpbar{height:6px;background:#020304;border:1px solid var(--line);border-radius:3px;overflow:hidden;margin-top:6px;}
+  .xpbar i{display:block;height:100%;background:linear-gradient(90deg,var(--acc),var(--purple));transition:width .5s cubic-bezier(.34,1.56,.64,1);}
+  .chips{display:flex;gap:7px;flex-wrap:wrap;margin-left:auto;}
+  .chip{font-family:var(--mono);font-size:.66rem;border:1px solid var(--line);border-radius:3px;padding:2px 8px;color:var(--dim);letter-spacing:.02em;}
+  .chip.on{color:#ffd76b;border-color:#6d5710;background:#2b220a;}
+  .quests{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;}
+  .q{font-size:.75rem;border:1px solid var(--line);border-radius:3px;padding:4px 10px;color:var(--dim);}
+  .q.done{color:var(--grn);border-color:#164a2e;background:#081a10;text-decoration:line-through;}
+  .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:8px;}
+  @media(max-width:700px){.stats{grid-template-columns:repeat(2,1fr);}}
+  .stat{background:var(--panel2);border:1px solid var(--line);border-bottom:2px solid var(--amber);border-radius:3px;padding:10px 12px;}
+  .stat .v{font-family:var(--mono);font-size:1.5rem;font-weight:600;font-variant-numeric:tabular-nums;}
+  .stat .k{font-size:.63rem;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-top:2px;}
+  canvas{width:100%;height:130px;display:block;}
+  .models{font-size:.78rem;color:var(--dim);margin-top:8px;display:flex;gap:12px;flex-wrap:wrap;font-family:var(--mono);} .models b{color:var(--ink);}
+  /* heatmap */
+  .hm{overflow-x:auto;}
+  .hmgrid{display:grid;grid-auto-rows:26px;gap:4px;align-items:center;min-width:640px;}
+  .hmlabel{font-size:.76rem;color:var(--dim);padding-right:8px;white-space:nowrap;}
+  .hmcell{height:22px;border-radius:2px;background:#0a0c10;border:1px solid #161b26;position:relative;}
+  .hmcell span{position:absolute;inset:0;display:grid;place-items:center;font-family:var(--mono);font-size:.64rem;color:#dfe6f3;}
+  .hmday{font-family:var(--mono);font-size:.6rem;color:var(--dim);text-align:center;}
+  /* live feed + tables */
+  table{width:100%;border-collapse:collapse;font-size:.83rem;}
+  th{color:var(--dim);font-size:.63rem;text-transform:uppercase;letter-spacing:.08em;text-align:left;padding:5px 8px;border-bottom:1px solid var(--line);}
+  td{padding:7px 8px;border-bottom:1px solid var(--line);vertical-align:top;}
+  td.mono,td .mono{font-variant-numeric:tabular-nums;}
+  .pulse{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--grn);box-shadow:0 0 0 0 rgba(61,220,132,.6);animation:hb 2.2s cubic-bezier(.3,.7,.4,1) infinite;}
+  @keyframes hb{0%{transform:scale(1);box-shadow:0 0 0 0 rgba(61,220,132,.5);}18%{transform:scale(1.5);box-shadow:0 0 0 4px rgba(61,220,132,0);}40%{transform:scale(1);}100%{transform:scale(1);box-shadow:0 0 0 0 rgba(61,220,132,0);}}
+  @keyframes sweep{0%{background-position:0 -100%;opacity:0;}10%{opacity:1;}100%{background-position:0 200%;opacity:0;}}
+  .kind-agent{color:var(--purple);} .kind-session{color:var(--acc);}
+  /* nba */
+  .nba1{display:flex;gap:14px;align-items:flex-start;padding:4px 2px 12px;border-bottom:1px solid var(--line);margin-bottom:10px;}
+  .nba1 .rank{flex:none;width:34px;height:34px;border-radius:3px;background:linear-gradient(135deg,var(--acc),var(--purple));display:grid;place-items:center;font-family:var(--mono);font-weight:700;font-size:1.05rem;color:#05070a;}
+  .nba1 .body .t{font-family:var(--disp);font-weight:700;font-size:1.02rem;}
+  .nba1 .body .w{color:var(--dim);font-size:.83rem;margin:2px 0 6px;}
+  .nba1 .body code{background:#020304;border:1px solid var(--line);border-radius:3px;padding:5px 8px;font-size:.72rem;display:inline-block;max-width:100%;overflow-x:auto;white-space:nowrap;}
+  .nbamore{display:flex;flex-direction:column;gap:7px;}
+  .nbarow{display:flex;gap:10px;align-items:baseline;font-size:.83rem;}
+  .nbarow .sc{flex:none;width:26px;color:var(--dim);font-family:var(--mono);font-size:.7rem;text-align:right;}
+  .nbarow .rt{color:var(--ink);} .nbarow .rw{color:var(--dim);}
+  .copybtn{border:none;background:none;color:var(--acc);cursor:pointer;font-size:.72rem;padding:0 4px;}
+  .stars{white-space:nowrap;cursor:pointer;user-select:none;letter-spacing:2px;color:#3d4457;} .stars .on{color:#ffd76b;}
+  /* launcher */
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px;}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:13px 14px;}
+  .card .t{font-family:var(--disp);font-weight:600;display:flex;align-items:center;gap:8px;font-size:.9rem;}
+  .card .d{color:var(--dim);font-size:.79rem;margin:5px 0 9px;}
+  .runline{display:flex;gap:6px;}
+  .runline code{flex:1;background:#020304;border:1px solid var(--line);border-radius:3px;padding:6px 8px;font-size:.7rem;overflow-x:auto;white-space:nowrap;}
+  button{font:inherit;font-family:var(--body);cursor:pointer;border:1px solid var(--line);background:var(--panel2);color:var(--ink);border-radius:3px;padding:5px 10px;font-size:.76rem;transition:border-color .12s,transform .12s;}
+  button:hover{border-color:var(--acc);}
+  button:active{transform:translateY(1px);}
+  button:focus-visible,input:focus-visible,select:focus-visible{outline:1px solid var(--amber);box-shadow:0 0 0 3px rgba(255,176,32,.2);}
+  /* kanban */
+  .filters{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;}
+  .filters button.act{border-color:var(--acc);color:var(--acc);}
+  .board{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;}
+  @media(max-width:820px){.board{grid-template-columns:1fr 1fr;}} @media(max-width:520px){.board{grid-template-columns:1fr;}}
+  .col{background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:10px;min-height:130px;display:flex;flex-direction:column;}
+  .col h3{font-family:var(--disp);margin:2px 4px 10px;font-size:.7rem;font-weight:600;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;display:flex;justify-content:space-between;}
+  .col.drop{outline:2px dashed var(--acc);outline-offset:-4px;}
+  .col.overwip h3{color:var(--amber);}
+  .kcard{background:var(--panel2);border:1px solid var(--line);border-radius:3px;padding:8px 10px;margin-bottom:8px;font-size:.83rem;cursor:grab;transition:transform .1s,border-color .1s;}
+  .kcard:hover{border-color:var(--hair);}
+  .kcard.dragging{border-color:var(--line);transform:translateY(-1px);}
+  .kcard .kv{font-family:var(--mono);font-size:.62rem;color:var(--dim);margin-top:4px;display:flex;justify-content:space-between;}
+  .kcard .x{color:var(--dim);cursor:pointer;border:none;background:none;padding:0 2px;}
+  .kcard.settle{animation:settle .5s cubic-bezier(.34,1.56,.64,1);}
+  @keyframes settle{0%{transform:translateY(-3px) scale(1.015);}100%{transform:translateY(0) scale(1);}}
+  .addrow{display:flex;gap:6px;margin-top:auto;padding-top:6px;}
+  .addrow input,.addrow select{font:inherit;font-family:var(--body);background:#020304;border:1px solid var(--line);color:var(--ink);border-radius:3px;padding:5px 8px;font-size:.75rem;}
+  .addrow input{flex:1;min-width:0;}
+  .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--panel2);border:1px solid var(--grn);color:var(--grn);padding:8px 16px;border-radius:3px;font-size:.85rem;font-family:var(--mono);opacity:0;transition:.2s;pointer-events:none;z-index:20;}
+  .toast.show{opacity:1;}
+</style>
+</head>
+<body>
+<header>
+  <h1 title="your agent company, one deck">⎈ HELM <span>&middot; mission control &middot; live</span></h1>
+  <nav id="tabs">
+    <button data-t="overview" class="act">🏛 Overview</button>
+    <button data-t="agents">🤖 Agents</button>
+    <button data-t="board">📋 Board</button>
+    <button data-t="hq">🎛 Agent HQ</button>
+    <button data-t="logs">📜 Logs</button>
+    <button data-t="analytics">📊 Analytics</button>
+    <button data-t="ablit">🔓 Abliterated</button>
+  </nav>
+  <button id="pageRefresh" title="Refresh THIS tab's data — no full browser reload" style="border-color:#2a5599;color:#7fb0ff;font-weight:700;font-size:1rem;padding:5px 11px">↻</button>
+  <button id="helmUpdate" title="Update HELM from GitHub" style="border-color:#a371f755;color:#c9b6ff">⬆ update</button>
+  <a href="/graphify-out/graph.html" target="_blank" title="Knowledge graph of the whole HELM ecosystem (graphify)" style="text-decoration:none"><button style="border-color:#a371f755;color:#c9b6ff">🕸 Graph</button></a>
+  <button id="docbtn" style="border-color:#2ea04355" title="Self-diagnostics + safe fixes">🩺</button>
+  <button id="apprBell" style="display:none;background:#3a1414;border-color:#7a2020;color:#ffb3b3;font-weight:700;animation:pu 1.4s infinite" title="Pending approvals need your click">🔔 0 waiting for you</button>
+  <button id="modeBtn" style="font-weight:700" title="Autopilot ⇄ Manual takeover">⏳ mode…</button>
+  <div class="svc" id="svc">…</div>
+</header>
+
+<!-- manual-takeover modal -->
+<div id="takeoverModal" style="display:none;position:fixed;inset:0;z-index:33;background:rgba(5,7,10,.8);backdrop-filter:blur(3px)">
+  <div style="max-width:640px;margin:5vh auto;max-height:88vh;display:flex;flex-direction:column;background:var(--panel);border:1px solid var(--amber);border-radius:14px;overflow:hidden">
+    <div style="display:flex;align-items:center;gap:10px;padding:12px 18px;border-bottom:1px solid var(--line);background:rgba(210,153,34,.08)">
+      <b style="font-size:1.05rem">✋ Manual takeover — you have the wheel</b>
+      <button id="toClose" style="margin-left:auto;border:1px solid var(--line);background:var(--panel2);color:var(--dim);border-radius:6px;padding:2px 9px;cursor:pointer">close</button>
+    </div>
+    <div id="toBody" style="padding:14px 18px;overflow-y:auto"></div>
+    <div style="padding:12px 18px;border-top:1px solid var(--line);display:flex;gap:10px;align-items:center">
+      <button id="toResume" style="background:linear-gradient(135deg,#238636,#2ea043);border:none;color:#fff;font-weight:700;padding:9px 16px;border-radius:9px;cursor:pointer">🤖 Resume Autopilot</button>
+      <span style="font-size:.72rem;color:var(--dim)">Autopilot runs queued missions hands-off (auto-approve + auto-failover).</span>
+    </div>
+  </div>
+</div>
+<div id="docpanel" style="display:none;max-width:1280px;margin:14px auto 0;padding:0 20px;">
+  <div class="panel">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+      <b id="docsum">running diagnostics…</b><button id="docclose" style="margin-left:auto">close</button>
+    </div>
+    <table><thead><tr><th></th><th>check</th><th>detail</th><th>auto-fix applied</th></tr></thead><tbody id="docrows"></tbody></table>
+  </div>
+</div>
+<main>
+
+<!-- ============ OVERVIEW (CEO) ============ -->
+<section data-tab="overview" class="act">
+  <h2 style="margin-top:6px">Start my day <span class="sub">— pick a single agent or a combo; nothing heavy runs unless you choose it</span></h2>
+  <div class="panel" style="margin-bottom:6px">
+    <div style="font-size:.7rem;color:var(--dim);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Single provider</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+      <button class="daybtn" data-p="claude" style="padding:9px 14px">🤖 Claude</button>
+      <button class="daybtn" data-p="codex" style="padding:9px 14px">⬛ Codex</button>
+      <button class="daybtn" data-p="antigravity" style="padding:9px 14px">🔺 Antigravity</button>
+      <button class="daybtn" data-p="gemma" style="padding:9px 14px">🟢 Gemma (local, free)</button>
+    </div>
+    <div style="font-size:.7rem;color:var(--dim);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Combos</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <button class="daybtn" data-p="trio" style="padding:9px 14px;border-color:#2a5599">🧠 Trio (Claude + consultants warm)</button>
+      <button class="daybtn" data-p="full" style="padding:9px 14px;border-color:#5a3fa9">🏢 Full company</button>
+      <span style="color:var(--dim);font-size:.72rem">boot tier (this server) auto-starts with Windows; buttons launch the rest on demand</span>
+    </div>
+  </div>
+
+  <h2 id="flightHdr" style="display:none">▶ In flight <span class="sub">— missions underway: real progress (sub-jobs done), time elapsed, ETA</span></h2>
+  <div id="flightPanel" class="panel" style="display:none;margin-bottom:6px"></div>
+
+  <h2 id="stuckHdr" style="display:none">⚠ Stuck &amp; needs your attention <span class="sub">— tasks that silently stalled; each says why + how to unstick it</span></h2>
+  <div id="stuckPanel" class="panel" style="display:none;margin-bottom:6px;border-color:#7a5a20"></div>
+
+  <h2>Next best action <span class="sub">— ranked across every venture, live</span></h2>
+  <div id="nba" class="panel" style="margin-bottom:6px">reading signals…</div>
+
+  <div class="row hero">
+    <div class="panel">
+      <div class="gam">
+        <div class="lvlring">
+          <svg width="74" height="74"><circle cx="37" cy="37" r="31" fill="none" stroke="#232838" stroke-width="7"/><circle id="ring" cx="37" cy="37" r="31" fill="none" stroke="#1f6feb" stroke-width="7" stroke-linecap="round" stroke-dasharray="194.8" stroke-dashoffset="194.8"/></svg>
+          <div class="n" id="lvl">–</div>
+        </div>
+        <div class="meta" style="flex:1">
+          <div class="t" id="rank">Operator</div>
+          <div style="color:var(--dim);font-size:.8rem" id="xpline">…</div>
+          <div class="xpbar"><i id="xpfill" style="width:0%"></i></div>
+        </div>
+        <div class="chips" id="badges"></div>
+      </div>
+      <div class="quests" id="quests"></div>
+    </div>
+    <div class="panel">
+      <div class="stats" id="stats"></div>
+      <div style="font-size:.72rem;color:var(--amber)" id="scan"></div>
+    </div>
+  </div>
+
+  <h2>Work heat map <span class="sub">— commits per venture per day, last 14 days</span></h2>
+  <div class="panel hm"><div class="hmgrid" id="heatmap" style="grid-template-columns:110px repeat(14,1fr);"></div></div>
+
+  <h2>Live floor <span class="sub">— every active session &amp; agent, reporting its current action</span></h2>
+  <div class="panel" style="overflow-x:auto">
+    <table><thead><tr><th></th><th>who</th><th>id</th><th>current action</th><th>seen</th></tr></thead>
+    <tbody id="feed"><tr><td colspan="5" style="color:var(--dim)">listening…</td></tr></tbody></table>
+  </div>
+
+  <h2>Shipped <span class="sub">— real output per venture</span></h2>
+  <div class="panel" style="overflow-x:auto">
+    <table><thead><tr><th>venture</th><th>today</th><th>7 days</th><th>last commit</th><th>when</th></tr></thead>
+    <tbody id="shipped"><tr><td colspan="5" style="color:var(--dim)">reading git…</td></tr></tbody></table>
+  </div>
+</section>
+
+<!-- ============ AGENTS ============ -->
+<section data-tab="agents">
+  <h2>⏸ Approvals <span class="sub">— background agents pause HERE and wait for your click. Nothing in this list has happened yet.</span></h2>
+  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+    <button id="apprAll" style="border-color:#2ea043;color:var(--grn)">✅ Approve all</button>
+    <label style="display:flex;gap:6px;align-items:center;font-size:.82rem;color:var(--dim);cursor:pointer">
+      <input type="checkbox" id="apprAuto"> <b id="apprAutoLbl">Auto-approve everything</b>
+    </label>
+    <span id="apprAutoWarn" style="display:none;font-size:.74rem;color:var(--amber)">⚠ gate is OFF — background agents now run without asking you</span>
+  </div>
+  <div id="apprPanel" class="panel" style="margin-bottom:6px">no pending approvals</div>
+
+  <h2>Running now <span class="sub">— every terminal &amp; agent process actually on this PC right now</span></h2>
+  <div class="panel" style="overflow-x:auto;margin-bottom:6px">
+    <table><thead><tr><th>what</th><th>pid</th><th>window title</th><th>mem</th></tr></thead>
+    <tbody id="termTbl"><tr><td colspan="4" style="color:var(--dim)">checking…</td></tr></tbody></table>
+  </div>
+
+  <h2>Approval history <span class="sub">— last 10, most recent first</span></h2>
+  <div class="panel" style="margin-bottom:6px" id="apprHist">—</div>
+
+  <h2>Live agents &amp; sessions <span class="sub">— anything active in the last 5 minutes</span></h2>
+  <div class="panel" style="overflow-x:auto">
+    <table><thead><tr><th></th><th>who</th><th>id</th><th>current action</th><th>seen</th></tr></thead>
+    <tbody id="feed2"><tr><td colspan="5" style="color:var(--dim)">listening…</td></tr></tbody></table>
+  </div>
+  <h2>Workflow runs <span class="sub">— rate them; ratings feed XP</span></h2>
+  <div class="panel" style="overflow-x:auto">
+    <table><thead><tr><th></th><th>run</th><th>session</th><th>agents</th><th>duration</th><th>last activity</th><th>your rating</th></tr></thead>
+    <tbody id="runs"><tr><td colspan="7" style="color:var(--dim)">loading…</td></tr></tbody></table>
+  </div>
+</section>
+
+<!-- ============ BOARD ============ -->
+<section data-tab="board">
+  <h2>Give a mission <span class="sub">— describe the outcome; a Claude session breaks it into jobs and assigns agents</span></h2>
+  <div class="panel" style="margin-bottom:14px">
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <input id="missionText" placeholder="e.g. Ship the ORBEAN receipt-printing fix and document it" style="flex:1;min-width:220px;background:#080a0f;border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:9px 11px;font:inherit;font-size:.9rem">
+      <select id="missionV" style="background:#080a0f;border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:9px;font:inherit"></select>
+      <button id="missionAttach" title="attach photos / videos / files">📎</button>
+      <input type="file" id="missionFiles" multiple style="display:none">
+      <button id="missionAdd" style="background:linear-gradient(135deg,var(--acc),var(--purple));border:none;color:#fff;font-weight:600;padding:9px 16px">🎯 Queue mission</button>
+    </div>
+    <div id="attachList" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px"></div>
+    <div style="color:var(--dim);font-size:.78rem;margin-top:8px">Queued missions land in Backlog tagged <b>🎯 mission</b>. To run them, tell a Claude session: <code style="background:#080a0f;padding:2px 6px;border-radius:5px">/mission</code> — it decomposes, spawns agents, and updates this board live.</div>
+  </div>
+  <h2>Task board <span class="sub">— agents move cards themselves; 📄 = report attached</span></h2>
+  <div id="boardLegend" style="display:flex;gap:14px;flex-wrap:wrap;font-size:.72rem;color:var(--dim);margin-bottom:8px"></div>
+  <div class="filters" id="vfilters"></div>
+  <div class="board" id="board"></div>
+  <h2>Launch</h2>
+  <div class="grid" id="launch"></div>
+</section>
+
+<!-- ============ AGENT HQ ============ -->
+<section data-tab="hq">
+  <h2 style="margin-top:6px">Agent recommender <span class="sub">— describe the task; get the right agents ranked with ready invocations</span></h2>
+  <div class="panel" style="margin-bottom:6px">
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <input id="recTask" placeholder="e.g. debug ESP32 firmware crash on the lockbox security board" style="flex:1;min-width:240px;background:#080a0f;border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:9px 11px;font:inherit;font-size:.9rem">
+      <button id="recBtn" style="background:linear-gradient(135deg,var(--acc),var(--purple));border:none;color:#fff;font-weight:600;padding:9px 16px">🎯 Recommend</button>
+    </div>
+    <div id="recOut" style="margin-top:10px"></div>
+    <div style="color:var(--dim);font-size:.72rem;margin-top:6px">Keyword-match ranking (transparent, instant). For deep semantic matching, ask Claude in chat: "which agent for: …" — it reads the same library.</div>
+  </div>
+
+  <h2>Agent library <span class="sub">— every subagent on this machine; click a card to open the training studio</span></h2>
+  <div class="grid" id="agentLib"><div style="color:var(--dim)">scanning ~/.claude/agents…</div></div>
+</section>
+
+<!-- agent training studio modal -->
+<div id="hqmodal" style="display:none;position:fixed;inset:0;z-index:31;background:rgba(5,7,10,.78);backdrop-filter:blur(3px);">
+  <div style="max-width:860px;margin:4vh auto;max-height:88vh;display:flex;flex-direction:column;background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:hidden;">
+    <div style="display:flex;align-items:center;gap:10px;padding:12px 18px;border-bottom:1px solid var(--line);flex-wrap:wrap">
+      <b id="hqname">agent</b>
+      <span class="chip" title="prompt editing + learned rules + versioned archive. No weight fine-tuning exists for Claude agents — the prompt IS the trainable surface.">ℹ prompt-training</span>
+      <span style="margin-left:auto;display:flex;gap:8px">
+        <button id="hqsave" style="border-color:#2ea043;color:var(--grn)">💾 save (versions)</button>
+        <button id="hqclose">close</button>
+      </span>
+    </div>
+    <div style="display:flex;gap:0;flex:1;min-height:0">
+      <div style="flex:1.6;display:flex;flex-direction:column;min-width:0;border-right:1px solid var(--line)">
+        <textarea id="hqeditor" spellcheck="false" style="flex:1;min-height:44vh;background:#0a0c11;color:var(--ink);border:none;outline:none;padding:14px;font-family:ui-monospace,Consolas,monospace;font-size:.78rem;line-height:1.5;resize:none"></textarea>
+        <div style="display:flex;gap:6px;padding:10px;border-top:1px solid var(--line)">
+          <input id="hqlesson" placeholder="teach a lesson, e.g. 'always check COM port is free before flashing'" style="flex:1;background:#080a0f;border:1px solid var(--line);color:var(--ink);border-radius:7px;padding:7px 10px;font:inherit;font-size:.8rem">
+          <button id="hqteach" style="border-color:#5a3fa9;color:#c9b6ff">🧠 train</button>
+        </div>
+      </div>
+      <div style="flex:1;overflow-y:auto;padding:12px 14px;min-width:220px">
+        <div style="font-size:.72rem;color:var(--dim);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Archive — versions</div>
+        <div id="hqversions" style="display:flex;flex-direction:column;gap:6px;font-size:.78rem"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ LOGS ============ -->
+<section data-tab="logs">
+  <h2>Approval activity <span class="sub">— every decision the system asked you for, and what happened</span> <button id="logRefresh" style="font-size:.68rem;padding:2px 8px;margin-left:6px">refresh</button></h2>
+  <div class="stats" id="apprStats" style="margin-bottom:6px"></div>
+  <div class="panel" id="apprTimeline" style="margin-bottom:6px">loading…</div>
+
+  <h2>System logs <span class="sub">— the raw diaries each part of the system writes, newest at the bottom</span></h2>
+  <div id="logFiles">loading…</div>
+</section>
+
+<!-- ============ ANALYTICS ============ -->
+<section data-tab="analytics">
+  <h2>Models &amp; capacity <span class="sub">— more models + more free tokens, the legitimate way (one key per provider, no multi-accounting)</span> <button id="modRefresh" style="font-size:.68rem;padding:2px 8px;margin-left:6px">refresh</button></h2>
+  <div class="panel" id="modPanel" style="margin-bottom:6px">loading catalog…</div>
+
+  <h2>Token Governor <span class="sub" id="govFreshness">— live usage vs budget, pace projection, emergency levers</span> <button id="govRefresh" style="font-size:.68rem;padding:2px 8px;margin-left:6px">refresh now</button></h2>
+  <div class="panel" id="govPanel" style="margin-bottom:6px">reading usage…</div>
+
+  <h2>Provider status <span class="sub">— what's actually measurable per provider; none of these expose a local quota % (verified) — honest links where they don't</span> <button id="provRefresh" style="font-size:.68rem;padding:2px 8px;margin-left:6px">refresh now</button></h2>
+  <div class="panel" id="provPanel" style="margin-bottom:6px">checking providers…</div>
+
+  <h2>Budgets <span class="sub">— output-token targets (edit + save); all figures are tokens, never invented $</span></h2>
+  <div class="panel" style="margin-bottom:6px">
+    <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center">
+      <label style="font-size:.82rem">Daily <input id="budDaily" type="number" style="width:120px;background:#080a0f;border:1px solid var(--line);color:var(--ink);border-radius:6px;padding:5px 7px;font:inherit"></label>
+      <label style="font-size:.82rem">Weekly <input id="budWeekly" type="number" style="width:130px;background:#080a0f;border:1px solid var(--line);color:var(--ink);border-radius:6px;padding:5px 7px;font:inherit"></label>
+      <label style="font-size:.82rem">Warn % <input id="budWarn" type="number" style="width:64px;background:#080a0f;border:1px solid var(--line);color:var(--ink);border-radius:6px;padding:5px 7px;font:inherit"></label>
+      <label style="font-size:.82rem">Crit % <input id="budCrit" type="number" style="width:64px;background:#080a0f;border:1px solid var(--line);color:var(--ink);border-radius:6px;padding:5px 7px;font:inherit"></label>
+      <button id="budSave" style="border-color:#2ea043;color:var(--grn)">save budgets</button>
+    </div>
+  </div>
+
+  <h2>Token burn — last 14 days <span class="sub" id="chartnote"></span></h2>
+  <div class="panel"><canvas id="chart" height="130"></canvas><div class="models" id="models"></div></div>
+</section>
+
+<!-- ============ ABLITERATED (local uncensored models) ============ -->
+<section data-tab="ablit">
+  <h2>🔓 Abliterated · local uncensored models <span class="sub">— refusal-removed open models, run 100% on your PC via Ollama · nothing leaves this machine</span></h2>
+  <div class="panel" style="border-color:#5a3fa9;margin-bottom:12px">
+    <div style="font-size:.82rem;color:var(--ink)">These are <b>abliterated</b> (refusal direction removed) / uncensored open-weight models that run <b>entirely local</b> through Ollama — no cloud, no API, no logging. They'll attempt anything you ask, so <b>you own the outputs</b>. On a 6GB GPU prefer 3B–4B @ Q4; bigger models run on CPU (slower).</div>
+    <div id="ablitOllama" style="font-size:.75rem;color:var(--dim);margin-top:7px"></div>
+  </div>
+
+  <h2>Curated models <span class="sub">— verified on HuggingFace; one-click pull into Ollama</span></h2>
+  <div class="grid" id="ablitCatalog">loading…</div>
+
+  <h2>🤗 HuggingFace search <span class="sub">— find any model; GGUF ones pull straight into Ollama</span></h2>
+  <div class="panel" style="margin-bottom:6px">
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <input id="hfQ" placeholder="e.g. llama-3 abliterated gguf" style="flex:1;min-width:200px;background:#080a0f;border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:8px 11px;font:inherit;font-size:.85rem">
+      <button id="hfBtn" style="background:linear-gradient(135deg,var(--acc),var(--purple));border:none;color:#fff;font-weight:600;padding:8px 15px">🔍 search HF</button>
+    </div>
+    <div id="hfResults" style="margin-top:10px"></div>
+  </div>
+
+  <h2>💬 Local chat <span class="sub">— talk to a pulled model; attach an image for vision models · all on-device</span></h2>
+  <div class="panel">
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;align-items:center">
+      <select id="ablitModel" style="background:#080a0f;border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:7px 9px;font:inherit;font-size:.82rem;min-width:220px"></select>
+      <button id="ablitImgBtn" title="attach an image (vision models)" style="border:1px solid var(--line);background:var(--panel2);color:var(--ink);border-radius:7px;padding:6px 10px;cursor:pointer">🖼 image</button>
+      <input type="file" id="ablitImg" accept="image/*" style="display:none">
+      <span id="ablitImgName" style="font-size:.72rem;color:var(--dim)"></span>
+    </div>
+    <textarea id="ablitPrompt" rows="3" placeholder="ask anything — runs locally, uncensored" style="width:100%;box-sizing:border-box;background:#080a0f;border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:8px 11px;font:inherit;font-size:.85rem;resize:vertical"></textarea>
+    <div style="display:flex;gap:8px;margin-top:8px;align-items:center">
+      <button id="ablitSend" style="background:linear-gradient(135deg,#238636,#2ea043);border:none;color:#fff;font-weight:700;padding:8px 16px;border-radius:9px;cursor:pointer">▶ Run locally</button>
+      <span style="font-size:.72rem;color:var(--dim)">no key, no cloud — needs the model pulled + Ollama running</span>
+    </div>
+    <div id="ablitOut" style="margin-top:12px;font-size:.86rem;line-height:1.5;white-space:pre-wrap"></div>
+  </div>
+</section>
+
+</main>
+<div class="toast" id="toast">ok</div>
+<!-- card detail: click any card -> where the work lives + what to do -->
+<div id="cardModal" style="display:none;position:fixed;inset:0;z-index:32;background:rgba(5,7,10,.78);backdrop-filter:blur(3px);">
+  <div style="max-width:640px;margin:6vh auto;max-height:86vh;display:flex;flex-direction:column;background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:hidden;">
+    <div id="cmHead" style="padding:14px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px">
+      <b id="cmTitle" style="flex:1">task</b><button id="cmClose">close</button>
+    </div>
+    <div id="cmBody" style="padding:16px 20px;overflow-y:auto"></div>
+  </div>
+</div>
+<div id="repmodal" style="display:none;position:fixed;inset:0;z-index:30;background:rgba(5,7,10,.75);backdrop-filter:blur(3px);" >
+  <div style="max-width:760px;margin:6vh auto;max-height:84vh;display:flex;flex-direction:column;background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:hidden;">
+    <div style="display:flex;align-items:center;gap:10px;padding:12px 18px;border-bottom:1px solid var(--line);">
+      <b id="reptitle" style="flex:1">report</b>
+      <a id="repraw" href="#" target="_blank" style="color:var(--dim);font-size:.75rem">raw</a>
+      <button id="repclose">close</button>
+    </div>
+    <div id="repbody" style="padding:16px 22px;overflow-y:auto;font-size:.9rem;line-height:1.65;"></div>
+  </div>
+</div>
+
+<script>
+const LAUNCH=[
+ {t:"fable-loop",c:"#3fb950",d:"Fable plans → Opus executes → reviewer verifies vs rendered reality.",run:"Workflow({name:'fable-loop', args:{task:'...', cwd:'...', venture:'orbean'}})"},
+ {t:"venture-standup",c:"#1f6feb",d:"Cross-venture brief + infra health, prioritized.",run:"Workflow({name:'venture-standup'})"},
+ {t:"claude-retrain",c:"#d29922",d:"Refresh domain memory from disk.",run:"Workflow({name:'claude-retrain'})"},
+ {t:"oorulogix-audit",c:"#a371f7",d:"Research → adversarial verify → consulting report.",run:"Workflow({name:'oorulogix-audit', args:{subject:'...'}})"},
+ {t:"/startup",c:"#3fb950",d:"Morning ritual: infra, cascade, brief.",run:"/startup"},
+ {t:"/council",c:"#1f6feb",d:"Codex + Antigravity + Gemma, Claude judges.",run:"/council <question>"},
+];
+let VENTURES=["orbean","lockbox","olog","booth","oorulogix","wio","infra"];
+// ONE colour per venture, used EVERYWHERE (board stripe, chips, filters) so the whole system
+// is scannable at a glance. Distinct, colour-blind-friendlier hues.
+let VCOLOR={orbean:'#1f6feb',lockbox:'#f0883e',olog:'#a371f7',booth:'#3fb950',oorulogix:'#db61a2',wio:'#e3b341',infra:'#8b949e',shivnex:'#3fb950',kubera:'#56d4dd'};
+const vcol=(v)=>VCOLOR[(v||'').toLowerCase()]||'#8b949e';
+// status/health -> colour + label, derived from a card's col + status text.
+function healthOf(t){
+  const s=(t.status||'').toLowerCase(), c=t.col;
+  if(c==='done') return {c:'#3ddc84',dot:'#3ddc84',tag:'done'};
+  if(/blocked/.test(s)) return {c:'#ff4d4f',dot:'#ff4d4f',tag:'blocked'};
+  if(/partial|paused|awaiting|held|confirmation|not approved|needs human|failed/.test(s)) return {c:'#ffb020',dot:'#ffb020',tag:'needs you'};
+  if(c==='doing'||/running|dispatched/.test(s)) return {c:'#22d3ee',dot:'#22d3ee',tag:'in progress'};
+  if(c==='review') return {c:'#8b7fff',dot:'#8b7fff',tag:'review'};
+  return {c:'#6b7688',dot:'#6b7688',tag:'queued'};
+}
+const COLHDR={backlog:'#6b7688',doing:'#22d3ee',review:'#8b7fff',done:'#3ddc84'};
+// venture -> where the work lives on disk + which tab to act in
+let VDIR={
+  orbean:{dir:'C:\\Users\\VAISHAK\\ORBEAN', what:'ORBEAN POS / storefront (TS/Next/Firebase)'},
+  lockbox:{dir:'C:\\Users\\VAISHAK\\Desktop\\lockbox firmware', what:'AurumGuard MK II firmware + AWS'},
+  olog:{dir:'C:\\Users\\VAISHAK\\ol websites\\autopalette', what:'AutoPalette site (OLOG). Generated assets land in Helm\\attachments & \\reports.'},
+  booth:{dir:'C:\\Users\\VAISHAK\\hostel video call', what:'Shivnex booth (WebRTC + Firebase)'},
+  shivnex:{dir:'C:\\Users\\VAISHAK\\hostel video call', what:'Shivnex booth (WebRTC + Firebase)'},
+  oorulogix:{dir:'C:\\Users\\VAISHAK\\Desktop\\oorulogix', what:'Oorulogix reports/audits'},
+  wio:{dir:'C:\\Users\\VAISHAK\\wio-token-monitor', what:'Wio Terminal gadget'},
+  kubera:{dir:'C:\\Users\\VAISHAK\\Kubera', what:'Kubera POS site'},
+  infra:{dir:'C:\\Users\\VAISHAK\\Desktop\\automation\\mission-control', what:'Helm itself + automation'},
+};
+const vdir=(v)=>VDIR[(v||'').toLowerCase()]||{dir:'C:\\Users\\VAISHAK', what:'(no specific folder mapped)'};
+// match a display name ("OLOG site", "Shivnex (booth)") to a venture colour (longest key first)
+const vcolName=(name)=>{ const n=(name||'').toLowerCase(); const ks=Object.keys(VCOLOR).sort((a,b)=>b.length-a.length); for(const k of ks){ if(n.includes(k)) return VCOLOR[k]; } return '#8b949e'; };
+const cdot=(c)=>`<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${c};margin-right:6px;vertical-align:1px"></span>`;
+const WIP_LIMIT=2;
+const $=(id)=>document.getElementById(id);
+const toast=(m)=>{const t=$('toast');t.textContent=m;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),1100);};
+const fmt=(n)=>n>=1e9?(n/1e9).toFixed(2)+'B':n>=1e6?(n/1e6).toFixed(2)+'M':n>=1e3?(n/1e3).toFixed(1)+'k':''+n;
+const esc=(s)=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+const copy=(s)=>navigator.clipboard.writeText(s).then(()=>toast('copied'));
+
+/* tabs */
+document.querySelectorAll('#tabs button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('#tabs button').forEach(x=>x.classList.toggle('act',x===b));
+  document.querySelectorAll('section[data-tab]').forEach(s=>s.classList.toggle('act',s.dataset.tab===b.dataset.t));
+  if(b.dataset.t==='analytics'){ renderChart(); pollGov(); pollProviders(false); pollModels(); }
+  if(b.dataset.t==='ablit'){ pollAblit(); }
+});
+/* in-page refresh: re-fetch the ACTIVE tab's data without a full browser reload */
+function refreshTab(){
+  const active=document.querySelector('#tabs button.act')?.dataset.t||'overview';
+  const C=(...fns)=>fns.forEach(f=>{ try{ const g=window[f]; if(typeof g==='function')g(); }catch(e){} });
+  C('pollSvc','pollSummary','pollMode');                                   // header/global bits
+  if(active==='overview') C('pollWork','pollHeat','pollFeed','pollNba','pollFlight','pollStuck','pollRuns','renderGam');
+  else if(active==='agents') C('pollApprovals','pollTerminals','pollRuns','pollFeed');
+  else if(active==='board'){ try{ loadState().then(()=>C('renderBoard','renderGam')); }catch(e){ C('renderBoard'); } }
+  else if(active==='hq') C('loadAgentsHQ','pollHQ','renderAgentLib');
+  else if(active==='logs') C('pollLogs','pollApprovalHistory');
+  else if(active==='analytics') C('renderChart','pollGov','pollProviders','pollModels');
+  else if(active==='ablit') C('pollAblit');
+  const btn=document.getElementById('pageRefresh'); if(btn){ btn.style.transition='transform .4s'; btn.style.transform='rotate(360deg)'; setTimeout(()=>btn.style.transform='',420); }
+  toast('↻ refreshed '+active);
+}
+document.getElementById('pageRefresh').onclick=refreshTab;
+/* GitHub self-update */
+async function pollVersion(){
+  try{ const v=await (await fetch('/api/version')).json(); const b=document.getElementById('helmUpdate'); if(!b)return;
+    if(v.git){ b.textContent='⬆ update'; b.style.opacity=''; b.title=`On ${v.branch}@${v.commit} — click to pull latest from GitHub`; }
+    else { b.textContent='⬆ update'; b.style.opacity='.55'; b.title=v.note||'not a git install — updates disabled'; }
+  }catch(e){}
+}
+document.getElementById('helmUpdate').onclick=async()=>{
+  if(!confirm('Pull the latest HELM from GitHub and restart?\n\nYour config.json + board state are kept (they\'re git-ignored). A terminal will show the git pull.'))return;
+  try{ const r=await (await fetch('/api/update',{method:'POST'})).json();
+    toast(r.ok?('⬆ '+(r.msg||'updating…')):('update: '+(r.error||'?')));
+  }catch(e){ toast('update failed'); }
+};
+
+/* state */
+let state={tasks:[],ratings:[],events:[]};
+let saveTimer=null, vFilter='all';
+async function loadConfig(){
+  // ventures/paths/colours come from the server's config.json (per-machine) - never hardcoded.
+  try{
+    const c=await (await fetch('/api/config')).json();
+    if(c && Array.isArray(c.ventures) && c.ventures.length){
+      VENTURES=c.ventures.map(v=>v.id);
+      VCOLOR={}; VDIR={};
+      c.ventures.forEach(v=>{ VCOLOR[v.id]=v.color||'#8b949e'; VDIR[v.id]={dir:v.dir||'',what:v.what||'(no folder mapped)'}; });
+      try{ if($('missionV')) $('missionV').innerHTML=VENTURES.map(v=>`<option>${esc(v)}</option>`).join(''); }catch(e){}
+    }
+  }catch(e){}
+}
+async function loadState(){ try{ state=await (await fetch('/api/state')).json(); }catch(e){}
+  try{ const old=JSON.parse(localStorage.getItem('mc.tasks.v1')||'[]');
+    if(old.length && !state.tasks.length){ state.tasks=old; saveState(); localStorage.removeItem('mc.tasks.v1'); } }catch(e){}
+}
+function saveState(){ clearTimeout(saveTimer); saveTimer=setTimeout(()=>fetch('/api/state',{method:'POST',body:JSON.stringify(state)}).catch(()=>{}),300); }
+
+/* launcher */
+LAUNCH.forEach(x=>{
+  const div=document.createElement('div');div.className='card';
+  div.innerHTML=`<div class="t"><span class="dot up" style="background:${x.c}"></span>${x.t}</div><div class="d">${x.d}</div><div class="runline"><code>${esc(x.run)}</code><button>copy</button></div>`;
+  div.querySelector('button').onclick=()=>copy(x.run);
+  $('launch').appendChild(div);
+});
+
+/* kanban with venture filter + WIP limit */
+const COLS=[["backlog","Backlog"],["doing","Doing"],["review","Review"],["done","Done"]];
+let dragId=null;
+function renderFilters(){
+  const vs=['all',...VENTURES];
+  $('vfilters').innerHTML=vs.map(v=>{
+    const active=vFilter===v, dot=v==='all'?'':`<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${vcol(v)};margin-right:5px"></span>`;
+    const n=v==='all'?'':' ('+state.tasks.filter(t=>t.v===v&&t.col!=='done').length+')';
+    return `<button data-v="${v}" class="${active?'act':''}" style="${active&&v!=='all'?`border-color:${vcol(v)};color:${vcol(v)}`:''}">${dot}${v}${n}</button>`;
+  }).join('');
+  $('vfilters').querySelectorAll('button').forEach(b=>b.onclick=()=>{vFilter=b.dataset.v;renderBoard();});
+}
+function renderBoard(){
+  renderFilters();
+  const lg=$('boardLegend');
+  if(lg&&!lg.dataset.done){
+    const health=[['queued','#8b949e'],['in progress','#1f6feb'],['review','#a371f7'],['needs you','#d29922'],['blocked','#f85149'],['done','#3fb950']];
+    lg.innerHTML='<b style="color:var(--ink)">status:</b>'+health.map(([n,c])=>`${cdot(c)}${n}`).join('  ')+' &nbsp;|&nbsp; <b style="color:var(--ink)">left stripe = venture</b>';
+    lg.dataset.done='1';
+  }
+  const b=$('board');b.innerHTML='';
+  COLS.forEach(([id,label])=>{
+    const col=document.createElement('div');col.className='col';col.dataset.col=id;
+    const inCol=state.tasks.filter(t=>t.col===id);
+    const shown=inCol.filter(t=>vFilter==='all'||t.v===vFilter);
+    if(id==='doing'&&inCol.length>WIP_LIMIT)col.classList.add('overwip');
+    const ch=COLHDR[id]||'#8b949e';
+    col.innerHTML=`<h3 style="border-left:3px solid ${ch};padding-left:8px;color:${ch}">${label}${id==='doing'?` <span>${inCol.length}/${WIP_LIMIT}</span>`:`<span>${inCol.length||''}</span>`}</h3>`;
+    shown.forEach(t=>{
+      const k=document.createElement('div');k.className='kcard';k.draggable=true;k.dataset.id=t.id;
+      const hp=healthOf(t), vc=vcol(t.v);
+      k.style.borderLeft=`4px solid ${vc}`;                       // venture stripe on every card
+      const badges=[];
+      if(t.mission) badges.push('<span class="chip" style="border-color:#5a3fa9;color:#c9b6ff">🎯 mission</span>');
+      badges.push(`<span class="chip" style="border-color:${vc}88;color:${vc}">${esc(t.v)}</span>`);
+      badges.push(`<span class="chip" style="border-color:${hp.c}66;color:${hp.c}">${hp.tag}</span>`);
+      if(t.agent) badges.push(`<span class="chip" style="border-color:#2a5599;color:#7fb0ff">🤖 ${esc(t.agent)}</span>`);
+      if(t.mission){                                   // per-task run-mode toggle (autopilot vs manual)
+        const md=(t.settings&&t.settings.mode)||'', isA=md==='auto';
+        const lbl=md===''?'⚙ set mode':(isA?'🤖 auto':'✋ manual'), mc=md===''?'#8b949e':(isA?'#2ea043':'#d29922');
+        badges.push(`<button class="modeTog chip" data-id="${esc(t.id)}" data-mode="${md}" title="per-task control — click to toggle autopilot / manual (⚙ in card for full settings)" style="cursor:pointer;border-color:${mc}88;color:${mc}">${lbl}</button>`);
+        if(t.settings&&t.settings.promptAddon) badges.push('<span class="chip" title="has a prompt add-on" style="border-color:#5a3fa9;color:#c9b6ff">📝</span>');
+      }
+      const rep=t.report?` <button class="repbtn" data-r="${esc(t.report)}" data-t="${esc(t.text)}" style="border:none;background:none;color:var(--grn);font-size:.72rem;cursor:pointer;padding:0">📄 report</button>`:'';
+      const atts=(t.files||[]).map(f=>` <a href="${esc(f.url)}" target="_blank" style="color:var(--acc);font-size:.72rem;text-decoration:none" title="${esc(f.name)}">📎</a>`).join('');
+      const statusLine=t.status?`<div style="font-size:.68rem;color:${hp.c};margin-top:3px">${esc(t.status)}</div>`:'';
+      k.innerHTML=`<div><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${hp.dot};margin-right:6px;vertical-align:1px"></span>${esc(t.text)}${rep}${atts}</div>${statusLine}<div class="kv" style="flex-wrap:wrap;gap:4px;margin-top:5px">${badges.join('')}<button class="x" style="margin-left:auto">✕</button></div>`;
+      k.style.cursor='pointer';
+      k.addEventListener('dragstart',()=>{dragId=t.id;});
+      k.addEventListener('click',(e)=>{ if(e.target.closest('button,a'))return; openCard(t); });
+      k.querySelector('.x').onclick=(e)=>{e.stopPropagation();state.tasks=state.tasks.filter(z=>z.id!==t.id);saveState();renderBoard();};
+      k.querySelector('.modeTog')?.addEventListener('click',async(e)=>{ e.stopPropagation();
+        const next=e.currentTarget.dataset.mode==='auto'?'manual':'auto';
+        try{ await fetch('/api/task/settings',{method:'POST',body:JSON.stringify({id:t.id,settings:{mode:next}})}); t.settings={...(t.settings||{}),mode:next}; toast('this task → '+(next==='auto'?'🤖 autopilot':'✋ manual')); renderBoard(); }catch(err){ toast('failed'); } });
+      col.appendChild(k);
+    });
+    if(id==='backlog'){
+      const row=document.createElement('div');row.className='addrow';
+      row.innerHTML=`<input placeholder="new task…"><select>${VENTURES.map(v=>`<option${vFilter===v?' selected':''}>${v}</option>`).join('')}</select><button>+</button>`;
+      const inp=row.querySelector('input'),sel=row.querySelector('select');
+      const add=()=>{if(!inp.value.trim())return;state.tasks.push({id:''+Date.now()+Math.floor(Math.random()*1e4),text:inp.value.trim(),v:sel.value,col:'backlog',ts:Date.now()});inp.value='';saveState();renderBoard();renderGam();};
+      row.querySelector('button').onclick=add;inp.addEventListener('keydown',e=>e.key==='Enter'&&add());
+      col.appendChild(row);
+    }
+    col.addEventListener('dragover',e=>{e.preventDefault();col.classList.add('drop');});
+    col.addEventListener('dragleave',()=>col.classList.remove('drop'));
+    col.addEventListener('drop',e=>{e.preventDefault();col.classList.remove('drop');const t=state.tasks.find(z=>z.id===dragId);
+      if(t&&t.col!==id){ if(id==='done')t.doneTs=Date.now(); t.col=id; const movedId=dragId; saveState();renderBoard();renderGam();
+        const el=document.querySelector(`.kcard[data-id="${movedId}"]`); if(el){el.classList.add('settle'); setTimeout(()=>el.classList.remove('settle'),500);} }});
+    b.appendChild(col);
+  });
+}
+
+/* mission intake — with multimodal attachments (photos/videos/any file) */
+$('missionV').innerHTML=VENTURES.map(v=>`<option>${v}</option>`).join('');
+let pendingFiles=[]; // {name,url,path,size}
+function renderAttach(){
+  $('attachList').innerHTML=pendingFiles.map((f,i)=>`<span class="chip" style="color:var(--acc)">📎 ${esc(f.name)} <span style="color:var(--dim)">(${fmt(f.size)}B)</span> <button class="x" data-i="${i}" style="border:none;background:none;color:var(--dim);cursor:pointer">✕</button></span>`).join('');
+  $('attachList').querySelectorAll('.x').forEach(b=>b.onclick=()=>{pendingFiles.splice(+b.dataset.i,1);renderAttach();});
+}
+async function uploadFiles(files){
+  for(const f of files){
+    toast('uploading '+f.name+'…');
+    try{ const r=await (await fetch('/api/upload?name='+encodeURIComponent(f.name),{method:'POST',body:f})).json();
+      if(r.ok){ pendingFiles.push({name:f.name,url:r.url,path:r.path,size:r.size}); } else { toast('upload failed: '+r.error); }
+    }catch(e){ toast('upload failed'); }
+  }
+  renderAttach();
+}
+$('missionAttach').onclick=()=>$('missionFiles').click();
+$('missionFiles').addEventListener('change',e=>uploadFiles([...e.target.files]));
+const mbox=$('missionText');
+['dragover','dragenter'].forEach(ev=>mbox.addEventListener(ev,e=>{e.preventDefault();mbox.style.borderColor='var(--acc)';}));
+['dragleave','drop'].forEach(ev=>mbox.addEventListener(ev,e=>{e.preventDefault();mbox.style.borderColor='var(--line)';}));
+mbox.addEventListener('drop',e=>{ if(e.dataTransfer.files.length) uploadFiles([...e.dataTransfer.files]); });
+// Ctrl+V multimodal paste: pull image/file blobs off the clipboard and upload them, while
+// letting a normal text paste flow through untouched. Pasted screenshots have no filename,
+// so synthesize a timestamped one.
+mbox.addEventListener('paste',e=>{
+  const dt=e.clipboardData||window.clipboardData;
+  const items=[...(dt?.items||[])];
+  let blobs=items.filter(it=>it.kind==='file').map(it=>it.getAsFile()).filter(Boolean);
+  if(!blobs.length && dt?.files?.length) blobs=[...dt.files]; // fallback: OS file-manager copy
+  if(!blobs.length) return; // pure text paste — leave it alone
+  e.preventDefault();
+  const named=blobs.map((f,i)=>{
+    if(f.name && f.name!=='image.png' && f.name!=='blob') return f;
+    const ext=((f.type||'image/png').split('/')[1]||'png').replace('jpeg','jpg');
+    return new File([f],`paste-${Date.now()}-${i}.${ext}`,{type:f.type||'image/png'});
+  });
+  toast(named.length+' pasted → uploading');
+  uploadFiles(named);
+});
+$('missionAdd').onclick=()=>{
+  const txt=$('missionText').value.trim(); if(!txt&&!pendingFiles.length)return;
+  state.tasks.push({id:''+Date.now()+Math.floor(Math.random()*1e4),text:txt||('mission with '+pendingFiles.length+' attachment(s)'),v:$('missionV').value,col:'backlog',mission:true,ts:Date.now(),files:pendingFiles});
+  $('missionText').value=''; pendingFiles=[]; renderAttach(); saveState(); renderBoard(); renderGam();
+  toast('🎯 mission queued — run /mission in a Claude session to execute');
+};
+$('missionText').addEventListener('keydown',e=>{if(e.key==='Enter')$('missionAdd').click();});
+
+/* live board sync — agents update state.json server-side; reflect it without clobbering a drag */
+let lastStateHash='';
+async function pollState(){
+  if(dragId)return;
+  try{ const s=await (await fetch('/api/state')).json();
+    const h=JSON.stringify(s.tasks); if(h===lastStateHash)return; lastStateHash=h;
+    if(document.activeElement&&document.activeElement.tagName==='INPUT')return;
+    state.tasks=s.tasks; state.ratings=s.ratings||state.ratings; renderBoard(); renderGam();
+  }catch(e){}
+}
+
+/* live data */
+let SUM=null, RUNS=[], WORK=null, HEAT=null, FEED=[], NBA=[];
+async function pollNba(){ try{ NBA=await (await fetch('/api/nba')).json(); renderNba(); }catch(e){} }
+function renderNba(){
+  const el=$('nba');
+  if(!NBA.length){ el.innerHTML='<span style="color:var(--grn)">✓ All clear — nothing urgent. Ship something.</span>'; return; }
+  const btn='border:1px solid var(--line);background:var(--panel2);border-radius:6px;padding:2px 7px;cursor:pointer;font-size:.72rem;color:var(--dim)';
+  el.innerHTML=NBA.map((a,i)=>{
+    const p=a.pinned;
+    return `<div style="display:flex;gap:10px;align-items:flex-start;padding:7px 2px;border-bottom:1px solid var(--line)">
+      <span style="flex:none;width:24px;text-align:center;font-family:var(--mono);font-weight:700;color:${i===0?'var(--acc)':'var(--dim)'}">${p?'📌':(i+1)}</span>
+      <div style="flex:1;min-width:0">
+        <div style="font-weight:600;font-size:.9rem;color:var(--ink)">${esc(a.title)}</div>
+        <div style="color:var(--dim);font-size:.8rem;margin:1px 0 5px">${esc(a.why)}</div>
+        <code style="background:#020304;border:1px solid var(--line);border-radius:4px;padding:3px 7px;font-size:.7rem;display:inline-block;max-width:100%;overflow-x:auto;white-space:nowrap">${esc(a.how)}</code>
+        <button class="copybtn" data-c="${encodeURIComponent(a.how)}" style="${btn};margin-left:4px">copy fix</button>
+      </div>
+      <div style="flex:none;display:flex;gap:3px;align-items:center">
+        ${p?`<button class="nbaMv" data-k="${esc(a.key)}" data-d="up" title="move up" style="${btn}">⬆</button><button class="nbaMv" data-k="${esc(a.key)}" data-d="down" title="move down" style="${btn}">⬇</button>`:''}
+        <button class="nbaPin" data-k="${esc(a.key)}" title="${p?'unpin — back to auto-rank':'pin to YOUR priority order'}" style="${btn}${p?';color:var(--acc);border-color:var(--acc)':''}">📌</button>
+      </div>
+    </div>`;
+  }).join('')+`<div style="font-size:.68rem;color:var(--dim);margin-top:7px">Top 10, live-ranked. <b>📌 pin</b> the ones you own to lock them to the top in your order; ⬆⬇ reorder pinned; the rest stay auto-ranked.</div>`;
+  el.querySelectorAll('.copybtn').forEach(b=>b.onclick=()=>copy(decodeURIComponent(b.dataset.c)));
+  el.querySelectorAll('.nbaPin').forEach(b=>b.onclick=()=>nbaPin('toggle',b.dataset.k));
+  el.querySelectorAll('.nbaMv').forEach(b=>b.onclick=()=>nbaPin(b.dataset.d,b.dataset.k));
+}
+async function nbaPin(op,key){ try{ const r=await(await fetch('/api/nba/pins',{method:'POST',body:JSON.stringify({op,key})})).json(); if(r.ok)await pollNba(); else toast('failed: '+(r.error||'?')); }catch(e){ toast('pin failed'); } }
+
+/* ---------------- Autopilot ⇄ Manual takeover ---------------- */
+let MODE='manual';
+function renderModeBtn(m){
+  const b=$('modeBtn'); if(!b)return; MODE=m.mode;
+  const rs=m.runner?(' · runner '+m.runner.state):'';
+  if(m.mode==='auto'){ b.textContent='🤖 Autopilot'; b.style.background='#0f2a16'; b.style.borderColor='#2ea043'; b.style.color='#7ee787'; b.title='AUTOPILOT ON'+rs+' — click to take over manually'; }
+  else { b.textContent='✋ Manual'; b.style.background='#2a2410'; b.style.borderColor='var(--amber)'; b.style.color='#ffd479'; b.title='MANUAL mode'+rs+' — click to hand back to Autopilot'; }
+}
+async function pollMode(){ try{ renderModeBtn(await (await fetch('/api/mode')).json()); }catch(e){} }
+$('modeBtn').onclick=async()=>{
+  const to=MODE==='auto'?'manual':'auto';
+  if(to==='auto' && !confirm('Resume AUTOPILOT?\n\nThe mission-runner will run queued missions HANDS-OFF — auto-approve + auto-failover ON, so it executes without asking you each time. Flip back to Manual anytime to pause + take over.'))return;
+  const r=await (await fetch('/api/mode',{method:'POST',body:JSON.stringify({mode:to})})).json();
+  toast(r.ok?('✓ '+(r.msg||to)):'failed: '+(r.error||'?'));
+  if(r.ok && to==='manual') openTakeover(r.manifest);
+  pollMode(); if(typeof pollFlight==='function')pollFlight(); if(typeof pollGov==='function')pollGov();
+};
+function moRow(m,kind){
+  const c=(typeof vcol==='function'?vcol(m.v):'#8b949e'); const dir=vdir(m.v);
+  return `<div style="border:1px solid var(--line);border-radius:9px;padding:9px 11px;margin-bottom:8px">
+    <div style="display:flex;gap:8px;align-items:baseline">
+      <span class="chip" style="border-color:${c}88;color:${c}">${esc(m.v||'—')}</span>
+      <b style="flex:1;font-size:.86rem">${esc(m.text||'(untitled)')}</b>
+      <span style="font-size:.64rem;color:var(--dim)">${kind}</span>
+    </div>
+    <div style="color:var(--dim);font-size:.74rem;margin:3px 0 6px">${esc(m.status||'')}${m.pct!=null?(' · '+m.pct+'%'):''}</div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap">
+      <button class="moFolder" data-dir="${esc(dir.dir)}" style="border:1px solid var(--line);background:var(--panel2);color:var(--ink);border-radius:6px;padding:3px 8px;cursor:pointer;font-size:.72rem">📂 open folder</button>
+      <button class="moCard" data-id="${esc(m.id)}" style="border:1px solid var(--line);background:var(--panel2);color:var(--ink);border-radius:6px;padding:3px 8px;cursor:pointer;font-size:.72rem">🎯 go to card</button>
+    </div></div>`;
+}
+function openTakeover(man){
+  man=man||{inflight:[],queued:[]};
+  const inf=man.inflight||[], q=man.queued||[];
+  let h='<div style="font-size:.82rem;color:var(--dim);margin-bottom:12px">Autopilot is paused — the runner stopped, auto-failover is off, approvals are manual. Here\'s everything it was driving; open each and take it over.</div>';
+  if(!inf.length && !q.length){ h+='<div style="color:var(--grn);font-size:.9rem">✓ Nothing was mid-flight — clean handover. You\'re in full manual control.</div>'; }
+  else{
+    if(inf.length){ h+='<div style="font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;color:var(--dim);margin:4px 0 7px">▶ In flight ('+inf.length+')</div>'+inf.map(m=>moRow(m,'in flight')).join(''); }
+    if(q.length){ h+='<div style="font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;color:var(--dim);margin:12px 0 7px">⏳ was queued to auto-run ('+q.length+')</div>'+q.map(m=>moRow(m,'queued')).join(''); }
+  }
+  $('toBody').innerHTML=h;
+  $('toBody').querySelectorAll('.moFolder').forEach(b=>b.onclick=async()=>{ const r=await(await fetch('/api/open-folder',{method:'POST',body:JSON.stringify({path:b.dataset.dir})})).json(); toast(r.ok?'📂 opened in Explorer':'couldn\'t open: '+(r.error||'?')); });
+  $('toBody').querySelectorAll('.moCard').forEach(b=>b.onclick=()=>{ const t=(typeof state!=='undefined'?(state.tasks||[]):[]).find(x=>x.id===b.dataset.id); $('takeoverModal').style.display='none'; const bt=document.querySelector('nav button[data-t="board"]'); if(bt)bt.click(); if(t&&typeof openCard==='function')openCard(t); });
+  $('takeoverModal').style.display='block';
+}
+$('toClose').onclick=()=>$('takeoverModal').style.display='none';
+$('takeoverModal').addEventListener('click',e=>{ if(e.target===$('takeoverModal'))$('takeoverModal').style.display='none'; });
+$('toResume').onclick=async()=>{ const r=await(await fetch('/api/mode',{method:'POST',body:JSON.stringify({mode:'auto'})})).json(); toast(r.ok?('✓ '+(r.msg||'autopilot on')):'failed'); $('takeoverModal').style.display='none'; pollMode(); };
+async function pollSummary(){ try{ SUM=await (await fetch('/api/summary')).json(); renderStats(); renderGam(); if(document.querySelector('section[data-tab=analytics]').classList.contains('act'))renderChart(); }catch(e){} }
+async function pollRuns(){ try{ RUNS=await (await fetch('/api/workflows')).json(); renderRuns(); renderGam(); }catch(e){} }
+async function pollWork(){ try{ WORK=await (await fetch('/api/work')).json(); renderWork(); renderGam(); }catch(e){} }
+async function pollHeat(){ try{ HEAT=await (await fetch('/api/heatmap')).json(); renderHeat(); }catch(e){} }
+async function pollFeed(){ try{ FEED=await (await fetch('/api/agents')).json(); renderFeed(); }catch(e){} }
+async function pollSvc(){ try{
+  const s=await (await fetch('/api/services')).json();
+  $('svc').innerHTML=s.map(x=>`<span><span class="dot ${x.up?'up':'down'}"></span><b>${x.name}</b>${x.loaded&&x.loaded.length?' · '+x.loaded.join(','):''}</span>`).join('');
+}catch(e){ $('svc').textContent='server offline'; } }
+
+function renderStats(){
+  const t=SUM.today,w=SUM.week;
+  $('stats').innerHTML=`
+    <div class="stat"><div class="v" style="color:${WORK&&WORK.commitsToday>0?'var(--grn)':'inherit'}">${WORK?WORK.commitsToday:'…'}</div><div class="k">commits today</div></div>
+    <div class="stat"><div class="v">${WORK?WORK.commitsWeek:'…'}</div><div class="k">commits · 7d</div></div>
+    <div class="stat"><div class="v">${fmt(t.out)}</div><div class="k">tok out today</div></div>
+    <div class="stat"><div class="v">${t.msgs}</div><div class="k">msgs today</div></div>`;
+  $('scan').textContent=SUM.scan.scanning?`scanning transcripts… ${SUM.scan.done}/${SUM.scan.total}`:'';
+  const bm=Object.entries(SUM.week.byModel).sort((a,b)=>b[1].out-a[1].out).slice(0,4);
+  $('models').innerHTML='<span style="color:var(--dim)">7d by model:</span> '+ (bm.map(([m,v])=>`<span><b>${m}</b> ${fmt(v.out)} out</span>`).join('') || '—');
+}
+function renderHeat(){
+  if(!HEAT)return;
+  const g=$('heatmap');
+  const max=Math.max(1,...HEAT.rows.flatMap(r=>r.cells));
+  let html='<div class="hmlabel"></div>'+HEAT.days.map(d=>`<div class="hmday">${d.slice(8)}</div>`).join('');
+  HEAT.rows.forEach(r=>{
+    html+=`<div class="hmlabel">${cdot(vcolName(r.name))}${r.name}</div>`+r.cells.map((c,i)=>{
+      const a=c?0.15+0.85*(c/max):0;
+      return `<div class="hmcell" title="${r.name} · ${HEAT.days[i]} · ${c} commit${c===1?'':'s'}" style="${c?`background:rgba(63,185,80,${a.toFixed(2)});border-color:rgba(63,185,80,.4);`:''}">${c?`<span>${c}</span>`:''}</div>`;
+    }).join('');
+  });
+  g.innerHTML=html;
+}
+function feedRows(list){
+  if(!list.length)return '<tr><td colspan="5" style="color:var(--dim)">quiet floor — nothing active in the last 5 min</td></tr>';
+  return list.map(a=>`<tr>
+    <td>${a.age<150?'<span class="pulse"></span>':''}</td>
+    <td class="kind-${a.kind}"><b>${a.kind==='agent'?'🤖':'🖥'} ${esc(a.who)}</b></td>
+    <td class="mono" style="color:var(--dim)">${esc(a.id)}</td>
+    <td>${esc(a.action)}</td>
+    <td style="color:var(--dim);white-space:nowrap">${a.age<60?a.age+'s':Math.floor(a.age/60)+'m'} ago</td></tr>`).join('');
+}
+function renderFeed(){ const h=feedRows(FEED); $('feed').innerHTML=h; $('feed2').innerHTML=h; }
+function renderWork(){
+  const tb=$('shipped');
+  if(!WORK||!WORK.ventures.length){tb.innerHTML='<tr><td colspan="5" style="color:var(--dim)">no venture repos found</td></tr>';return;}
+  tb.innerHTML=WORK.ventures.map(v=>`<tr>
+    <td><b>${cdot(vcolName(v.name))}${v.name}</b></td>
+    <td style="color:${v.today>0?'var(--grn)':'var(--dim)'};font-weight:${v.today>0?700:400}">${v.today||'—'}</td>
+    <td style="color:var(--dim)">${v.week}</td>
+    <td style="color:var(--dim)">${esc(v.lastMsg)}</td>
+    <td style="color:var(--dim);white-space:nowrap">${v.lastAgo}</td></tr>`).join('');
+}
+function renderChart(){
+  if(!SUM)return;
+  const c=$('chart'),dpr=window.devicePixelRatio||1;const W=c.clientWidth||1100,H=130;
+  c.width=W*dpr;c.height=H*dpr;const g=c.getContext('2d');g.scale(dpr,dpr);g.clearRect(0,0,W,H);
+  const days=SUM.daily; if(!days.length){g.fillStyle='#8b93a7';g.fillText('no data yet',10,20);return;}
+  const max=Math.max(...days.map(d=>d.out),1),bw=Math.min(56,(W-20)/days.length-8);
+  days.forEach((d,i)=>{
+    const x=10+i*((W-20)/days.length),h=Math.max(2,(d.out/max)*(H-34));
+    g.fillStyle=d.day===new Date().toISOString().slice(0,10)?'#a371f7':'#1f6feb';
+    g.beginPath();g.roundRect(x,H-22-h,bw,h,3);g.fill();
+    g.fillStyle='#8b93a7';g.font='9.5px ui-monospace';g.fillText(d.day.slice(5),x,H-9);
+    if(h>16){g.fillStyle='#c9d1e3';g.fillText(fmt(d.out),x,H-26-h);}
+  });
+  $('chartnote').textContent=`— output tokens/day, peak ${fmt(max)}`;
+}
+function stars(runId){
+  const r=state.ratings.find(x=>x.id===runId); const n=r?r.stars:0;
+  return `<span class="stars" data-id="${runId}">${[1,2,3,4,5].map(i=>`<span class="${i<=n?'on':''}" data-s="${i}">★</span>`).join('')}</span>`;
+}
+function renderRuns(){
+  const tb=$('runs');
+  if(!RUNS.length){tb.innerHTML='<tr><td colspan="7" style="color:var(--dim)">no workflow runs found yet</td></tr>';return;}
+  tb.innerHTML=RUNS.map(r=>`<tr>
+    <td>${r.live?'<span class="pulse"></span>':''}</td>
+    <td class="mono">${r.id.slice(0,10)}</td><td class="mono" style="color:var(--dim)">${r.session}</td>
+    <td>${r.agents}</td><td>${r.mins} min</td>
+    <td style="color:${r.live?'var(--grn)':'var(--dim)'}">${r.live?'RUNNING':new Date(r.last*1000).toLocaleString([],{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'})}${r.resumable?` <button class="copybtn" title="copy resume command" data-c="${encodeURIComponent(r.resumeCmd)}">⟳ resume</button>`:''}</td>
+    <td>${stars(r.id)}</td></tr>`).join('');
+  tb.querySelectorAll('.copybtn').forEach(b=>b.onclick=()=>copy(decodeURIComponent(b.dataset.c)));
+  tb.querySelectorAll('.stars').forEach(el=>el.addEventListener('click',e=>{
+    const s=e.target.dataset.s; if(!s)return;
+    const id=el.dataset.id, ex=state.ratings.find(x=>x.id===id);
+    if(ex){ex.stars=+s;}else{state.ratings.push({id,stars:+s,ts:Date.now()});}
+    saveState();renderRuns();renderGam();toast('rated '+s+'★');
+  }));
+}
+
+/* gamification — shipped work is the currency */
+const RANKS=["Intern","Operator","Orchestrator","Conductor","Architect","Fleet Commander","Singularity Wrangler"];
+function calcXP(){
+  if(!SUM)return{xp:0,streak:0};
+  let xp=(WORK?WORK.commitsWeek:0)*40;
+  xp+=state.tasks.filter(t=>t.col==='done').length*30;
+  xp+=RUNS.length*25;
+  xp+=state.ratings.length*10;
+  xp+=Math.floor(SUM.all.out/50000);
+  const set=new Set(WORK?WORK.shipDays:[]);
+  let streak=0;for(let i=0;;i++){const d=new Date(Date.now()-i*864e5).toISOString().slice(0,10);
+    if(set.has(d))streak++; else if(i===0)continue; else break;}
+  xp+=streak*30;
+  return {xp,streak};
+}
+function renderGam(){
+  if(!SUM)return;
+  const {xp,streak}=calcXP();
+  const lvl=Math.floor(Math.sqrt(xp/100)), cur=100*lvl*lvl, next=100*(lvl+1)*(lvl+1);
+  const frac=Math.min(1,(xp-cur)/(next-cur||1));
+  $('lvl').textContent=lvl; $('rank').textContent=RANKS[Math.min(lvl,RANKS.length-1)];
+  $('xpline').textContent=`${xp.toLocaleString()} XP · ${(next-xp).toLocaleString()} to L${lvl+1} · 🚢 ${streak}-day ship streak`;
+  $('xpfill').style.width=(frac*100)+'%';
+  $('ring').style.strokeDashoffset=194.8*(1-frac);
+  const done=state.tasks.filter(t=>t.col==='done').length;
+  const cw=WORK?WORK.commitsWeek:0, ct=WORK?WORK.commitsToday:0;
+  const badges=[
+    ["🚢 Shipped Today",ct>0],["📈 10-Commit Week",cw>=10],
+    ["🔥 Ship Streak 7",streak>=7],["📦 10 Cards Done",done>=10],
+    ["🎛️ Conductor",RUNS.length>=5],["⭐ Critic",state.ratings.length>=1],
+  ];
+  $('badges').innerHTML=badges.map(([n,on])=>`<span class="chip ${on?'on':''}" title="${on?'unlocked':'locked'}">${n}</span>`).join('');
+  const today=new Date().toISOString().slice(0,10);
+  const doing=state.tasks.filter(t=>t.col==='doing').length;
+  const qs=[
+    ["Ship a commit",ct>0],
+    ["Move a card to Done",state.tasks.some(t=>t.col==='done'&&t.doneTs&&new Date(t.doneTs).toISOString().slice(0,10)===today)],
+    [`WIP ≤ ${WIP_LIMIT} in Doing (now ${doing})`,doing<=WIP_LIMIT],
+    ["Orchestrate: run a workflow",RUNS.some(r=>new Date(r.last*1000).toISOString().slice(0,10)===today)],
+  ];
+  $('quests').innerHTML='<span class="q" style="border:none;color:var(--dim)">daily goals — real work:</span>'+qs.map(([n,on])=>`<span class="q ${on?'done':''}">${on?'✓ ':''}${n}</span>`).join('');
+}
+
+/* report viewer — tiny inline markdown renderer (headings, bold, code, lists, links) */
+function mdToHtml(md){
+  const esc2=(s)=>s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  let h=esc2(md);
+  h=h.replace(/```([\s\S]*?)```/g,(m,c)=>`<pre style="background:#080a0f;border:1px solid var(--line);border-radius:8px;padding:10px 12px;overflow-x:auto;font-size:.78rem">${c.trim()}</pre>`);
+  h=h.replace(/`([^`\n]+)`/g,'<code style="background:#080a0f;border:1px solid var(--line);border-radius:4px;padding:1px 5px;font-size:.82em">$1</code>');
+  h=h.replace(/^### (.*)$/gm,'<h4 style="margin:14px 0 4px">$1</h4>');
+  h=h.replace(/^## (.*)$/gm,'<h3 style="margin:16px 0 6px">$1</h3>');
+  h=h.replace(/^# (.*)$/gm,'<h2 style="margin:4px 0 10px;font-size:1.15rem">$1</h2>');
+  h=h.replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>');
+  h=h.replace(/^(\d+)\. (.*)$/gm,'<div style="margin:2px 0 2px 14px">$1. $2</div>');
+  h=h.replace(/^[-*] (.*)$/gm,'<div style="margin:2px 0 2px 14px">&bull; $1</div>');
+  h=h.replace(/\[([^\]]+)\]\((https?:[^)]+)\)/g,'<a href="$2" target="_blank" style="color:var(--acc)">$1</a>');
+  h=h.replace(/\n\n+/g,'<div style="height:8px"></div>');
+  return h;
+}
+async function openReport(url,title){
+  $('reptitle').textContent='📄 '+title; $('repraw').href=url;
+  $('repbody').innerHTML='<span style="color:var(--dim)">loading…</span>';
+  $('repmodal').style.display='block';
+  try{ const r=await fetch(url); $('repbody').innerHTML=r.ok?mdToHtml(await r.text()):`<span style="color:var(--red)">report not found (${r.status})</span>`; }
+  catch(e){ $('repbody').innerHTML='<span style="color:var(--red)">failed to load: '+esc(e.message)+'</span>'; }
+}
+$('repclose').onclick=()=>$('repmodal').style.display='none';
+$('repmodal').addEventListener('click',e=>{ if(e.target===$('repmodal')) $('repmodal').style.display='none'; });
+document.addEventListener('keydown',e=>{ if(e.key==='Escape') $('repmodal').style.display='none'; });
+document.addEventListener('click',e=>{ const b=e.target.closest('.repbtn'); if(b) openReport(b.dataset.r,b.dataset.t); });
+
+/* ---------------- Token Governor ---------------- */
+let GOV=null;
+function meterBar(pct, sev){
+  const col = sev==='critical'?'var(--red)':sev==='warn'?'var(--amber)':'var(--grn)';
+  const w = Math.min(100, pct);
+  return `<div style="height:12px;background:#080a0f;border:1px solid var(--line);border-radius:7px;overflow:hidden"><div style="height:100%;width:${w}%;background:${col};transition:width .4s"></div></div>`;
+}
+function freshLabel(ts){
+  if(!ts)return'never scanned';
+  const s=Math.round((Date.now()/1000)-ts);
+  return s<5?'just now':s<60?`${s}s ago`:s<3600?`${Math.round(s/60)}m ago`:`${Math.round(s/3600)}h ago`;
+}
+async function pollGov(){
+  try{
+    const s=await (await fetch('/api/summary')).json();
+    $('govFreshness').textContent=`— live usage vs budget · last scan: ${freshLabel(s.lastScanTs)}${s.scan.scanning?' (scanning...)':''}`;
+    GOV=await (await fetch('/api/governor')).json();
+    const [RH,EX,FO]=await Promise.all([
+      fetch('/api/runner').then(r=>r.json()).catch(()=>({state:'?',detail:''})),
+      fetch('/api/executor').then(r=>r.json()).catch(()=>({executor:'claude'})),
+      fetch('/api/failover').then(r=>r.json()).catch(()=>({auto:true,tiers:[]}))
+    ]);
+    const g=GOV, sev=g.severity;
+    const rhCol=RH.state==='polling'?'var(--grn)':RH.state==='hung'?'var(--red)':'var(--amber)';
+    const badge = sev==='critical'?'<span class="chip on" style="color:#f85149;border-color:#5a1a1a;background:#2a0f0f">🚨 CRITICAL</span>'
+      : sev==='warn'?'<span class="chip on">⚠️ WATCH</span>':'<span class="chip" style="color:var(--grn)">✓ healthy</span>';
+    const measures = g.measures.filter(m=>m.active);
+    const dotFor=(r)=> r===true?'#3fb950':r===false?'#f85149':'#e3b341';
+    const foHtml=`
+      <div style="border-top:1px solid var(--line);margin-top:10px;padding-top:10px">
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+          <span style="font-size:.72rem;color:var(--dim);text-transform:uppercase;letter-spacing:.06em">auto-failover chain</span>
+          <button class="govAct" data-a="autofo" data-cur="${FO.auto?'1':'0'}" style="border-color:${FO.auto?'#3fb95066':'#8b949e66'};color:${FO.auto?'#3fb950':'var(--dim)'}" title="When ON, if Claude/Fable/Opus runs out it switches to the next available agent with NO approval">${FO.auto?'⚡ FULL AUTO — ON':'○ manual (approve switches)'}</button>
+          <span style="font-size:.72rem;color:var(--dim)">${FO.auto?'Claude runs out → auto-switch to what\'s available, zero clicks':'you approve each agentic switch'}</span>
+        </div>
+        <div style="display:flex;gap:6px;align-items:stretch;flex-wrap:wrap">
+          ${(FO.tiers||[]).map((t,i)=>`
+            <div style="flex:1;min-width:158px;background:#080a0f;border:1px solid var(--line);border-radius:8px;padding:7px 9px">
+              <div style="display:flex;gap:6px;align-items:center"><span style="width:8px;height:8px;border-radius:50%;background:${dotFor(t.ready)};display:inline-block;flex:none"></span><b style="font-size:.82rem">${i+1}. ${esc(t.name)}</b><span class="chip" style="margin-left:auto;font-size:.6rem;color:${t.kind==='agentic'?'#58a6ff':'var(--dim)'}">${esc(t.kind)}</span></div>
+              <div style="font-size:.68rem;color:var(--dim);margin-top:3px">${esc(t.detail)}</div>
+              ${t.providers?`<div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:5px">${t.providers.map(pv=>`<span class="foKey" data-prov="${esc(pv.id)}" data-ready="${pv.ready?1:0}" title="${esc(pv.label)} — ${pv.ready?'connected':'click to add '+pv.env}" style="cursor:${pv.ready?'default':'pointer'};font-size:.62rem;padding:1px 6px;border-radius:4px;border:1px solid ${pv.ready?'#3fb95066':'var(--line)'};color:${pv.ready?'#3fb950':'var(--dim)'}">${pv.ready?'✓ ':'🔑 '}${esc(pv.id)}</span>`).join('')}</div>`:''}
+            </div>`).join('')}
+        </div>
+      </div>`;
+    $('govPanel').innerHTML=`
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+        <b style="font-size:1.02rem">${esc(g.headline)}</b> ${badge}
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:6px">
+        <div><div style="font-size:.74rem;color:var(--dim);margin-bottom:4px">TODAY · ${fmt(g.today.out)} / ${fmt(g.budget.dailyTokens)} out (${g.today.pct}%)</div>${meterBar(g.today.pct,sev)}</div>
+        <div><div style="font-size:.74rem;color:var(--dim);margin-bottom:4px">THIS WEEK · ${fmt(g.week.out)} / ${fmt(g.budget.weeklyTokens)} out (${g.week.pct}%)</div>${meterBar(g.week.pct,sev)}</div>
+      </div>
+      <div style="font-size:.78rem;color:var(--dim);margin:8px 0 4px">pace ${fmt(g.pacePerHour)}/hr · projected end-of-day ${fmt(g.projectedEod)} out (${g.projectedPct}% of daily)</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;border-top:1px solid var(--line);margin-top:10px;padding-top:10px">
+        <span style="font-size:.72rem;color:var(--dim);text-transform:uppercase;letter-spacing:.06em;margin-right:2px">controls</span>
+        <button class="govAct" data-a="raise" style="border-color:#3fb95066;color:#3fb950" title="Raise your daily/weekly token budget">+ Raise budget</button>
+        <span class="chip" title="${esc(RH.detail||'')}" style="color:${rhCol}">runner: ${esc(RH.state)}</span>
+        <button class="govAct" data-a="${RH.state==='polling'?'pause':'restart'}" style="border-color:${RH.state==='polling'?'#f8514966':'#1f6feb66'};color:${RH.state==='polling'?'#f85149':'#58a6ff'}" title="${RH.state==='polling'?'Pause the mission runner (stop the background fleet)':'Restart the runner - fixes a hung or stopped queue'}">${RH.state==='polling'?'Pause runner':'▶ Restart runner'}</button>
+        <button class="govAct" data-a="exec" data-cur="${esc(EX.executor)}" style="border-color:#a371f766;color:#a371f7" title="Switch how missions run: Claude-only, or the Claude->Codex->Gemma failover chain">↔ Switch executor: ${esc(EX.executor)}</button>
+        <button class="govAct" data-a="models" style="border-color:#1f6feb66;color:#58a6ff" title="Add API keys / connect more model providers (the legit way)">+ Manage models</button>
+      </div>
+      ${foHtml}
+      ${measures.length?`<div style="border-top:1px solid var(--line);margin-top:10px;padding-top:10px">
+        <div style="font-size:.72rem;color:${sev==='critical'?'var(--red)':'var(--amber)'};text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">🛟 emergency levers — cut tokens now</div>
+        ${measures.map(m=>`<div class="nbarow" style="margin:5px 0"><span><b>${esc(m.title)}</b> — <span class="rw">${esc(m.why)}</span><br><code style="font-size:.7rem;background:#080a0f;border:1px solid var(--line);border-radius:5px;padding:2px 6px">${esc(m.how)}</code> <button class="copybtn" data-c="${encodeURIComponent(m.how)}">copy</button></span></div>`).join('')}
+      </div>`:`<div style="font-size:.78rem;color:var(--dim);border-top:1px solid var(--line);margin-top:10px;padding-top:10px">All levers available on demand; they'll highlight here automatically as you approach the budget. 6 total incl. optical compression, Gemma offload, /compact.</div>`}`;
+    $('govPanel').querySelectorAll('.copybtn').forEach(b=>b.onclick=()=>copy(decodeURIComponent(b.dataset.c)));
+    $('govPanel').querySelectorAll('.govAct').forEach(b=>b.onclick=async()=>{
+      const a=b.dataset.a;
+      if(a==='raise'){
+        const cur=Math.round((GOV?.budget?.dailyTokens||3000000)/1e6);
+        const v=prompt('New DAILY token budget, in millions (weekly auto-sets to 7×):',cur); if(v===null)return;
+        const m=parseFloat(v); if(!(m>0)){toast('enter a positive number');return;}
+        const r=await (await fetch('/api/budget',{method:'POST',body:JSON.stringify({dailyTokens:Math.round(m*1e6),weeklyTokens:Math.round(m*7e6)})})).json();
+        toast(r.ok?`✓ daily budget → ${m}M · weekly → ${m*7}M`:'failed: '+(r.error||'?')); pollGov();
+      } else if(a==='pause'||a==='restart'){
+        if(a==='pause'&&!confirm('Pause the mission runner? Queued missions stop executing until you restart it.'))return;
+        b.disabled=true;
+        const r=await (await fetch('/api/runner',{method:'POST',body:JSON.stringify({action:a==='pause'?'stop':'restart'})})).json();
+        toast(r.ok?('✓ '+(r.msg||a)):'failed: '+(r.error||'?')); setTimeout(pollGov,2800);
+      } else if(a==='exec'){
+        const next=b.dataset.cur==='failover'?'claude':'failover';
+        if(next==='failover'&&!confirm('Route missions through the failover chain?\n\nClaude → Codex → cloud free-tier (Kimi/OpenRouter/Groq/Cerebras/Gemini) → Gemma. With auto-failover ON it switches automatically when a tier is exhausted.'))return;
+        const r=await (await fetch('/api/executor',{method:'POST',body:JSON.stringify({executor:next})})).json();
+        toast(r.ok?('✓ '+(r.msg||('executor → '+next))):'failed: '+(r.error||'?')); pollGov();
+      } else if(a==='autofo'){
+        const next=b.dataset.cur!=='1';
+        const r=await (await fetch('/api/failover',{method:'POST',body:JSON.stringify({auto:next})})).json();
+        toast(r.ok?('✓ '+(r.msg||('auto-failover '+(next?'ON':'OFF')))):'failed: '+(r.error||'?')); pollGov();
+      } else if(a==='models'){
+        const h=[...document.querySelectorAll('h2')].find(x=>/Models & capacity/i.test(x.textContent));
+        if(h){h.scrollIntoView({behavior:'smooth',block:'start'}); toast('Models & capacity — click 🔑 add key on any provider');}
+        else toast('open the Analytics tab to manage models');
+      }
+    });
+    $('govPanel').querySelectorAll('.foKey').forEach(b=>b.onclick=async()=>{
+      if(b.dataset.ready==='1'){ toast(b.dataset.prov+' is already connected'); return; }
+      const prov=b.dataset.prov;
+      const key=prompt('Paste the API key for '+prov+' (get a free one from its site — OpenRouter gives Kimi K2 + MiMo + more on one key):');
+      if(!key)return;
+      const r=await (await fetch('/api/models/setkey',{method:'POST',body:JSON.stringify({provider:prov,key:key.trim()})})).json();
+      if(r.ok&&r.test&&r.test.ok) toast('✓ '+prov+' connected — added to the failover chain');
+      else toast(r.ok?(prov+' saved but test failed: '+((r.test&&r.test.error)||'?')):'failed: '+(r.error||'?'));
+      pollGov();
+    });
+    // fill budget inputs (only if not focused, so we don't clobber typing)
+    if(document.activeElement?.tagName!=='INPUT'){
+      $('budDaily').value=g.budget.dailyTokens; $('budWeekly').value=g.budget.weeklyTokens;
+      $('budWarn').value=g.budget.warnPct; $('budCrit').value=g.budget.critPct;
+    }
+  }catch(e){ $('govPanel').innerHTML='<span style="color:var(--dim)">governor unavailable</span>'; }
+}
+$('govRefresh').onclick=async()=>{ $('govRefresh').disabled=true; await pollGov(); $('govRefresh').disabled=false; toast('refreshed'); };
+function provCard(name,icon,d){
+  if(!d)return`<div class="card"><div class="t">${icon} ${name}</div><div class="d" style="color:var(--dim)">checking…</div></div>`;
+  const unknown=d.installed===null; const installed=d.installed===true;
+  let badge;
+  if(name==='Claude') badge = d.oauthTokenSet?{c:'var(--grn)',t:'active'}:{c:'var(--amber)',t:'no token'};
+  else badge = unknown?{c:'var(--amber)',t:'unknown'}:installed?{c:'var(--grn)',t:'ok'}:{c:'var(--dim)',t:'unavailable'};
+  const rows=[];
+  if(name==='Claude'){ rows.push(`token set: ${d.oauthTokenSet?'yes ✓':'no'}`); rows.push(d.measured); }
+  if(name==='Codex'){ rows.push(unknown?'detection uncertain (see note)':installed?`auth: ${d.authed?'logged in ✓':'NOT logged in'}`:'not installed'); }
+  if(name==='Antigravity'){ rows.push(installed?`version ${d.version||'?'}`:'not installed'); }
+  if(name==='Gemma'){ rows.push(installed?`${(d.models||[]).length} model(s) available, ${(d.loaded||[]).length} loaded`:'ollama not reachable'); }
+  // connect / login button per provider (CLI/OAuth auth)
+  const LG={
+    Claude:{p:'claude', label:(d.oauthTokenSet?'🔄 refresh token':'🔑 set token'), show:true},
+    Codex:{p:'codex', label:'🔑 Log in to Codex', show:true},
+    Antigravity:{p:'antigravity', label:'🔑 Sign in', show:true},
+    Gemma:{p:'gemma', label:'▶ Start Ollama', show:!installed},
+  }[name];
+  const loginBtn=(LG&&LG.show)?`<button class="provLogin" data-p="${LG.p}" data-n="${esc(name)}" style="border-color:#2ea04366;color:var(--grn);margin-top:9px;font-size:.74rem">${LG.label}</button>`:'';
+  return `<div class="card">
+    <div class="t">${icon} ${name} <span class="chip" style="margin-left:auto;color:${badge.c}">${badge.t}</span></div>
+    <div class="d">${rows.map(r=>esc(r)).join('<br>')}</div>
+    <div style="font-size:.72rem;color:var(--dim);margin-top:4px">${esc(d.note||'')}</div>
+    ${loginBtn}
+    <div class="provLoginOut" data-n="${esc(name)}" style="font-size:.72rem;margin-top:5px"></div>
+  </div>`;
+}
+async function pollProviders(force){
+  try{
+    const p=await (await fetch('/api/providers'+(force?'/refresh':''), force?{method:'POST'}:{})).json();
+    $('provPanel').innerHTML=`<div class="grid">
+      ${provCard('Claude','🤖',p.claude)}${provCard('Codex','⬛',p.codex)}${provCard('Antigravity','🔺',p.antigravity)}${provCard('Gemma','🟢',p.gemma)}
+    </div>`;
+    $('provPanel').querySelectorAll('.provLogin').forEach(b=>b.onclick=async()=>{
+      const out=$('provPanel').querySelector(`.provLoginOut[data-n="${b.dataset.n}"]`);
+      out.style.color='var(--dim)'; out.textContent='launching…'; b.disabled=true;
+      try{
+        const r=await (await fetch('/api/provider/login',{method:'POST',body:JSON.stringify({provider:b.dataset.p})})).json();
+        if(r.ok){ out.style.color=r.launched?'var(--grn)':'var(--amber)'; out.innerHTML=esc(r.msg||'ok')+(r.url?` <a href="${esc(r.url)}" target="_blank" rel="noopener" style="color:#58a6ff">open ↗</a>`:''); }
+        else { out.style.color='var(--red)'; out.textContent='✕ '+(r.error||'failed'); }
+      }catch(e){ out.style.color='var(--red)'; out.textContent='launch failed'; }
+      b.disabled=false;
+    });
+  }catch(e){ $('provPanel').innerHTML='<span style="color:var(--dim)">unavailable</span>'; }
+}
+$('provRefresh').onclick=async()=>{ $('provRefresh').disabled=true; await pollProviders(true); $('provRefresh').disabled=false; toast('refreshed'); };
+
+async function pollModels(){
+  try{
+    const m=await (await fetch('/api/models')).json();
+    const groups={gateway:'🌐 Gateway',cloud:'☁️ Cloud free-tier',local:'🟢 Local (unlimited)'};
+    let html=`<div style="font-size:.78rem;color:var(--dim);margin-bottom:10px">${esc(m.note)}</div><div class="grid">`;
+    const PROV={'OpenRouter (gateway)':'openrouter','Groq':'groq','Moonshot / Kimi':'moonshot','Cerebras':'cerebras','Google AI Studio':'gemini'};
+    html+=m.models.map((x,i)=>{
+      const pid=x.pid||PROV[x.name];
+      const testBtn=pid?`<button class="modTest" data-p="${pid}" style="border-color:#2a5599;color:#7fb0ff">🔌 test</button>`:'';
+      const fixBtn=pid?`<button class="modFix" data-p="${pid}" style="border-color:#d2992255;color:var(--amber)" title="diagnose + auto-fix login/API errors">🩹 fix</button>`:'';
+      const getKey=x.keyUrl?`<a href="${esc(x.keyUrl)}" target="_blank" rel="noopener" style="font-size:.72rem;color:#58a6ff;text-decoration:none;align-self:center">🔗 get key ↗</a>`:'';
+      const reset=x.reset?`<div style="font-size:.67rem;color:#8b949e;margin-top:4px">⏱ resets: ${esc(x.reset)}</div>`:'';
+      return `<div class="card">
+      <div class="t">${esc(x.name)} <span class="chip" style="margin-left:auto;color:${x.available?'var(--grn)':'var(--dim)'}">${x.available?'ready':'add it'}</span></div>
+      <div class="d">${esc(x.free||'')}</div>
+      <div style="font-size:.72rem;color:var(--dim)">${esc(x.why||'')}</div>
+      ${reset}
+      ${pid?`<div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;align-items:center"><button class="modAdd" data-p="${pid}" style="border-color:#2ea043;color:var(--grn)">🔑 ${x.available?'re-key':'add key'}</button>${testBtn}${fixBtn}${getKey}</div>
+      <div class="modKeyRow" data-p="${pid}" style="display:none;gap:6px;margin-top:6px"><input type="password" class="modKeyIn" placeholder="paste ${esc(x.name)} key" style="flex:1;min-width:0;background:#080a0f;border:1px solid var(--line);color:var(--ink);border-radius:6px;padding:6px 8px;font-size:.75rem"><button class="modSave" data-p="${pid}" style="border-color:#2ea043;color:var(--grn)">save &amp; test</button></div>`
+      :`<div class="runline" style="margin-top:8px"><code style="font-size:.68rem">${esc(x.action||'')}</code><button class="modCopy" data-i="${i}">copy</button></div>`}
+      <div class="modResult" data-p="${pid||''}" style="font-size:.72rem;margin-top:4px"></div>
+    </div>`;}).join('');
+    html+='</div>';
+    $('modPanel').innerHTML=html;
+    $('modPanel').querySelectorAll('.modCopy').forEach(b=>b.onclick=()=>copy(m.models[+b.dataset.i].action||''));
+    $('modPanel').querySelectorAll('.modAdd').forEach(b=>b.onclick=()=>{
+      const row=$('modPanel').querySelector(`.modKeyRow[data-p="${b.dataset.p}"]`);
+      const open=row.style.display==='flex'; row.style.display=open?'none':'flex'; if(!open)row.querySelector('input').focus();
+    });
+    $('modPanel').querySelectorAll('.modSave').forEach(b=>b.onclick=async()=>{
+      const row=$('modPanel').querySelector(`.modKeyRow[data-p="${b.dataset.p}"]`), key=row.querySelector('input').value.trim();
+      const cell=$('modPanel').querySelector(`.modResult[data-p="${b.dataset.p}"]`);
+      if(key.length<8){cell.style.color='var(--amber)';cell.textContent='key looks too short';return;}
+      b.disabled=true; cell.style.color='var(--dim)'; cell.textContent='saving + testing…';
+      try{
+        const r=await (await fetch('/api/models/setkey',{method:'POST',body:JSON.stringify({provider:b.dataset.p,key})})).json();
+        if(r.ok&&r.test&&r.test.ok){ cell.style.color='var(--grn)'; cell.textContent=`✓ saved & connected — replied "${r.test.reply||'ok'}" (${r.test.ms}ms)`; row.style.display='none'; pollModels(); }
+        else if(r.ok&&r.test&&r.test.keyValid){ cell.style.color='var(--grn)'; cell.textContent='✓ key saved & VALID — '+(r.test.note||'ready'); row.style.display='none'; pollModels(); }
+        else if(r.ok){ cell.style.color='var(--amber)'; cell.textContent='key saved, but: '+((r.test&&(r.test.note||r.test.error))||'?'); }
+        else { cell.style.color='var(--red)'; cell.textContent='✕ '+(r.error||'failed'); }
+      }catch(e){ cell.style.color='var(--red)'; cell.textContent='error saving'; }
+      b.disabled=false;
+    });
+    $('modPanel').querySelectorAll('.modTest').forEach(b=>b.onclick=async()=>{
+      const cell=$('modPanel').querySelector(`.modResult[data-p="${b.dataset.p}"]`);
+      cell.style.color='var(--dim)'; cell.textContent='testing…'; b.disabled=true;
+      try{
+        const r=await (await fetch('/api/models/test?provider='+b.dataset.p)).json();
+        if(r.ok){ cell.style.color='var(--grn)'; cell.textContent=`✓ connected — replied "${r.reply||'ok'}" in ${r.ms}ms`; }
+        else if(r.keyValid){ cell.style.color='var(--grn)'; cell.textContent='✓ key VALID — '+(r.note||'ready'); }
+        else if(!r.connected){ cell.style.color='var(--amber)'; cell.textContent='no key yet — run: connect-model.ps1 '+b.dataset.p+' <KEY>'; }
+        else { cell.style.color='var(--red)'; cell.textContent='✕ '+(r.error||'failed'); }
+      }catch(e){ cell.style.color='var(--red)'; cell.textContent='test error'; }
+      b.disabled=false;
+    });
+    $('modPanel').querySelectorAll('.modFix').forEach(b=>b.onclick=()=>openFix(b.dataset.p));
+  }catch(e){ $('modPanel').innerHTML='<span style="color:var(--dim)">catalog unavailable</span>'; }
+}
+$('modRefresh').onclick=pollModels;
+
+/* ---------------- API/login error wizard (diagnose → auto-fix → AI fixer) ---------------- */
+async function openFix(pid){
+  $('fixTitle').textContent='🩹 Troubleshoot: '+pid;
+  $('fixBody').innerHTML='<span style="color:var(--dim)">running diagnosis…</span>';
+  $('fixModal').style.display='block';
+  try{ renderFix(pid, await (await fetch('/api/models/diagnose',{method:'POST',body:JSON.stringify({provider:pid})})).json()); }
+  catch(e){ $('fixBody').innerHTML='<span style="color:var(--red)">diagnose failed: '+esc(e.message)+'</span>'; }
+}
+function renderFix(pid,d){
+  const g=d.diagnosis||{}, t=d.test||{}, A=g.actions||[];
+  const sevc=g.severity==='high'?'var(--red)':g.severity==='ok'?'var(--grn)':'var(--amber)';
+  let acts='';
+  if(A.includes('autofix')) acts+=`<button class="fixAct" data-a="autofix" style="border-color:#2ea043;color:var(--grn)">🔧 Auto-fix (find a working model)</button>`;
+  acts+=`<button class="fixAct" data-a="aifix" style="border-color:#a371f755;color:#c9b6ff">🤖 AI troubleshoot</button>`;
+  acts+=`<button class="fixAct" data-a="test" style="border-color:#2a5599;color:#7fb0ff">🔌 Retest</button>`;
+  if(g.keyUrl) acts+=`<a href="${esc(g.keyUrl)}" target="_blank" rel="noopener" style="align-self:center;font-size:.76rem;color:#58a6ff;text-decoration:none">🔗 get / refresh key ↗</a>`;
+  if(A.includes('switch')) acts+=`<button class="fixAct" data-a="switch">↔ use a working provider</button>`;
+  $('fixBody').innerHTML=`
+    <div style="border:1px solid ${sevc}55;background:${sevc}14;border-radius:9px;padding:11px 13px;margin-bottom:12px">
+      <b style="color:${sevc}">${g.ok?'✓ ':''}${esc(g.title||'?')}</b>
+      <div style="font-size:.86rem;margin-top:4px;color:var(--ink)">${esc(g.human||'')}</div>
+      ${g.resetHint?`<div style="font-size:.72rem;color:var(--dim);margin-top:7px">⏱ ${esc(g.resetHint)}</div>`:''}
+      ${(!t.ok&&t.error)?`<div style="font-size:.66rem;color:var(--dim);margin-top:7px;font-family:var(--mono);word-break:break-all">raw: ${esc((t.error||'').slice(0,160))}</div>`:''}
+    </div>
+    <div style="display:flex;gap:7px;flex-wrap:wrap">${acts}</div>
+    <div id="fixOut" style="margin-top:13px;font-size:.84rem;line-height:1.4"></div>`;
+  $('fixBody').querySelectorAll('.fixAct').forEach(b=>b.onclick=()=>fixAction(b.dataset.a,pid));
+}
+async function fixAction(a,pid){
+  const out=$('fixOut'); out.style.color='var(--dim)';
+  if(a==='test'){ out.textContent='retesting…'; try{ renderFix(pid, await (await fetch('/api/models/diagnose',{method:'POST',body:JSON.stringify({provider:pid})})).json()); }catch(e){} if(typeof pollModels==='function')pollModels(); return; }
+  if(a==='switch'){ out.innerHTML='Working free providers to use instead: <b>OpenRouter · Groq · Cerebras · SambaNova · Mistral</b> — they\'re already in your failover chain. Set a key on any showing "add it".'; return; }
+  if(a==='autofix'){ out.textContent='🔧 running real queries to find a working model…';
+    try{ const r=await (await fetch('/api/models/autofix',{method:'POST',body:JSON.stringify({provider:pid})})).json();
+      out.style.color=r.ok?'var(--grn)':'var(--amber)'; out.textContent=(r.ok?'✓ ':'✕ ')+(r.msg||r.error||'?'); if(typeof pollModels==='function')pollModels();
+    }catch(e){ out.style.color='var(--red)'; out.textContent='auto-fix failed'; } return; }
+  if(a==='aifix'){ out.textContent='🤖 asking a working free LLM to troubleshoot this…';
+    try{ const r=await (await fetch('/api/models/aifix',{method:'POST',body:JSON.stringify({provider:pid})})).json();
+      if(r.ok){ out.style.color='var(--ink)'; out.innerHTML=`<div style="color:var(--dim);font-size:.72rem;margin-bottom:5px">🤖 diagnosed by <b>${esc(r.helper)}</b>:</div>`+mdToHtml(r.advice||'(no advice)'); }
+      else { out.style.color='var(--amber)'; out.textContent='✕ '+(r.error||'?'); }
+    }catch(e){ out.style.color='var(--red)'; out.textContent='AI fixer failed'; } return; }
+}
+
+$('budSave').onclick=async()=>{
+  const body={dailyTokens:+$('budDaily').value, weeklyTokens:+$('budWeekly').value, warnPct:+$('budWarn').value, critPct:+$('budCrit').value};
+  const r=await (await fetch('/api/budget',{method:'POST',body:JSON.stringify(body)})).json();
+  toast(r.ok?'budgets saved':'save failed: '+r.error); pollGov(); pollNba();
+};
+
+/* ---------------- Agent HQ ---------------- */
+let HQ_CUR=null;
+async function loadLib(){
+  try{
+    const list=await (await fetch('/api/agents-hq/list')).json();
+    $('agentLib').innerHTML=list.map(a=>`<div class="card" style="cursor:pointer" data-a="${esc(a.file)}">
+      <div class="t">🤵 ${esc(a.name)} <span class="chip" style="margin-left:auto">${esc(a.model)}</span></div>
+      <div class="d">${esc(a.description||'(no description)')}</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;font-size:.68rem;color:var(--dim)">
+        <span class="chip">🧠 ${a.lessons} lessons</span><span class="chip">🗄 ${a.versions} versions</span>
+        <span class="chip">${(a.bodyChars/1000).toFixed(1)}k chars</span>
+      </div></div>`).join('') || '<div style="color:var(--dim)">no agents found in ~/.claude/agents</div>';
+    $('agentLib').querySelectorAll('.card').forEach(c=>c.onclick=()=>openStudio(c.dataset.a));
+  }catch(e){ $('agentLib').innerHTML='<div style="color:var(--red)">failed: '+esc(e.message)+'</div>'; }
+}
+async function openStudio(name){
+  HQ_CUR=name;
+  $('hqname').textContent='🤵 '+name;
+  $('hqeditor').value='loading…';
+  $('hqmodal').style.display='block';
+  const a=await (await fetch('/api/agents-hq/get?name='+encodeURIComponent(name))).json();
+  $('hqeditor').value=a.content||('error: '+(a.error||'?'));
+  loadVersions(name);
+}
+async function loadVersions(name){
+  const vs=await (await fetch('/api/agents-hq/versions?name='+encodeURIComponent(name))).json();
+  $('hqversions').innerHTML=(vs.length?vs:['(no versions yet — saves and lessons create them)']).map(v=>
+    typeof v==='string'&&v.startsWith('(')?`<span style="color:var(--dim)">${v}</span>`
+    :`<span style="display:flex;gap:6px;align-items:center"><span class="mono" style="color:var(--dim)">${v.replace('.md','')}</span><button class="copybtn" data-v="${v}">restore</button></span>`).join('');
+  $('hqversions').querySelectorAll('button').forEach(b=>b.onclick=async()=>{
+    if(!confirm('Restore '+HQ_CUR+' to version '+b.dataset.v+'? Current prompt is archived first.'))return;
+    const r=await (await fetch('/api/agents-hq/restore',{method:'POST',body:JSON.stringify({name:HQ_CUR,version:b.dataset.v})})).json();
+    toast(r.ok?'restored '+b.dataset.v:'restore failed: '+r.error);
+    if(r.ok) openStudio(HQ_CUR);
+  });
+}
+$('hqsave').onclick=async()=>{
+  const r=await (await fetch('/api/agents-hq/save',{method:'POST',body:JSON.stringify({name:HQ_CUR,content:$('hqeditor').value})})).json();
+  toast(r.ok?'saved (prev archived as '+(r.backedUpAs||'first version')+')':'save failed: '+r.error);
+  if(r.ok){loadVersions(HQ_CUR);loadLib();}
+};
+$('hqteach').onclick=async()=>{
+  const lesson=$('hqlesson').value.trim(); if(!lesson)return;
+  const r=await (await fetch('/api/agents-hq/lesson',{method:'POST',body:JSON.stringify({name:HQ_CUR,lesson})})).json();
+  toast(r.ok?'🧠 lesson trained in':'failed: '+r.error);
+  if(r.ok){$('hqlesson').value='';openStudio(HQ_CUR);loadLib();}
+};
+$('hqclose').onclick=()=>$('hqmodal').style.display='none';
+$('hqmodal').addEventListener('click',e=>{if(e.target===$('hqmodal'))$('hqmodal').style.display='none';});
+$('recBtn').onclick=async()=>{
+  const task=$('recTask').value.trim(); if(!task)return;
+  $('recOut').innerHTML='<span style="color:var(--dim)">matching…</span>';
+  const recs=await (await fetch('/api/agents-hq/recommend',{method:'POST',body:JSON.stringify({task})})).json();
+  $('recOut').innerHTML=recs.length?recs.map((r,i)=>`<div class="nbarow" style="margin:4px 0">
+    <span class="sc">${i+1}</span>
+    <span><b>${esc(r.name)}</b> <span style="color:var(--dim)">score ${r.score} · matched: ${r.matched.join(', ')}</span><br>
+    <span style="color:var(--dim);font-size:.78rem">${esc(r.description)}</span><br>
+    <code style="font-size:.7rem;background:#080a0f;border:1px solid var(--line);border-radius:5px;padding:2px 6px">${esc(r.invocation)}</code>
+    <button class="copybtn" data-c="${encodeURIComponent(r.invocation)}">copy</button></span></div>`).join('')
+    :'<span style="color:var(--dim)">no keyword matches — try different words, or ask Claude in chat for a semantic match</span>';
+  $('recOut').querySelectorAll('.copybtn').forEach(b=>b.onclick=()=>copy(decodeURIComponent(b.dataset.c)));
+};
+$('recTask').addEventListener('keydown',e=>{if(e.key==='Enter')$('recBtn').click();});
+document.querySelector('#tabs button[data-t="hq"]').addEventListener('click',loadLib);
+
+/* day-start launcher */
+document.querySelectorAll('.daybtn').forEach(b=>b.onclick=async()=>{
+  b.disabled=true; const orig=b.textContent; b.textContent='launching…';
+  try{
+    const r=await (await fetch('/api/launch',{method:'POST',body:JSON.stringify({profile:b.dataset.p})})).json();
+    toast(r.ok?'🚀 '+b.dataset.p+' day launching — windows incoming':'launch failed: '+r.error);
+  }catch(e){ toast('launch failed: '+e.message); }
+  setTimeout(()=>{b.disabled=false;b.textContent=orig; pollSvc();},4000);
+});
+
+/* ---------------- Approvals (human-in-the-loop for background agents) ---------------- */
+async function pollApprovals(){
+  try{
+    const pend=await (await fetch('/api/approvals')).json();
+    const bell=$('apprBell');
+    if(pend.length){ bell.style.display='inline-block'; bell.textContent=`🔔 ${pend.length} waiting for you`; }
+    else bell.style.display='none';
+    $('apprPanel').innerHTML=pend.length? pend.map(a=>`
+      <div class="nba1" style="border-bottom:1px solid var(--line);padding-bottom:14px;margin-bottom:14px">
+        <div class="rank" style="background:#7a2020">⏸</div>
+        <div class="body" style="flex:1">
+          <div class="t">${esc(a.title)}</div>
+          <div class="w">${esc(a.detail)} <span style="color:var(--dim)">— requested by ${esc(a.who)}</span></div>
+          <div style="display:flex;gap:8px;margin-top:8px">
+            <button data-id="${a.id}" data-yes="1" style="background:#123a1e;border-color:#2ea043;color:#7ee2a8;font-weight:700;padding:8px 18px">✅ Approve</button>
+            <button data-id="${a.id}" data-yes="0" style="background:#3a1414;border-color:#7a2020;color:#ffb3b3;font-weight:700;padding:8px 18px">❌ Deny</button>
+          </div>
+        </div></div>`).join('')
+      : '<span style="color:var(--dim)">no pending approvals — nothing is waiting on you right now</span>';
+    $('apprPanel').querySelectorAll('button[data-id]').forEach(b=>b.onclick=async()=>{
+      b.closest('.nba1').style.opacity='.4';
+      await fetch('/api/approvals/respond',{method:'POST',body:JSON.stringify({id:b.dataset.id,approved:b.dataset.yes==='1'})});
+      toast(b.dataset.yes==='1'?'✅ approved':'❌ denied');
+      pollApprovals();
+    });
+  }catch(e){}
+}
+async function pollApprovalHistory(){
+  try{
+    const h=await (await fetch('/api/approvals/history')).json();
+    if(!h.length){ $('apprHist').innerHTML='<span style="color:var(--dim)">none yet</span>'; return; }
+    $('apprHist').innerHTML=h.slice(0,10).map(a=>{
+      const c=a.status==='approved'?'var(--grn)':a.status==='denied'?'var(--red)':'var(--amber)';
+      return `<div class="nbarow"><span class="sc">${a.status==='approved'?'✓':a.status==='denied'?'✕':'…'}</span>
+        <span><span class="rt">${esc(a.title)}</span> — <span style="color:${c}">${a.status}</span></span></div>`;
+    }).join('');
+  }catch(e){}
+}
+async function pollTerminals(){
+  try{
+    const t=await (await fetch('/api/terminals')).json();
+    $('termTbl').innerHTML=t.length?t.map(x=>`<tr><td><b>${esc(x.label)}</b></td><td class="mono" style="color:var(--dim)">${esc(x.pid)}</td><td>${esc(x.title)||'<span style="color:var(--dim)">(no title)</span>'}</td><td style="color:var(--dim)">${esc(x.mem)}</td></tr>`).join('')
+      :'<tr><td colspan="4" style="color:var(--dim)">nothing matched (quiet)</td></tr>';
+  }catch(e){}
+}
+document.querySelector('#tabs button[data-t="agents"]').addEventListener('click',()=>{pollApprovalHistory();pollTerminals();syncAutoApprove();});
+$('apprBell').onclick=()=>document.querySelector('#tabs button[data-t="agents"]').click();
+$('apprAll').onclick=async()=>{ const r=await (await fetch('/api/approvals/approve-all',{method:'POST'})).json(); toast(`✅ approved ${r.approved}`); pollApprovals(); pollApprovalHistory(); };
+async function syncAutoApprove(){ try{ const c=await (await fetch('/api/approvals/config')).json(); $('apprAuto').checked=!!c.autoApprove; $('apprAutoWarn').style.display=c.autoApprove?'inline':'none'; $('apprAutoLbl').style.color=c.autoApprove?'var(--amber)':''; }catch(e){} }
+$('apprAuto').onchange=async(e)=>{
+  const on=e.target.checked;
+  if(on && !confirm('Auto-approve turns the safety gate OFF — background missions and provider switch-overs will run WITHOUT asking you. Turn it on?')){ e.target.checked=false; return; }
+  await fetch('/api/approvals/auto',{method:'POST',body:JSON.stringify({on})});
+  toast(on?'auto-approve ON (gate off)':'auto-approve OFF (gate back on)'); syncAutoApprove();
+};
+
+/* ---------------- card detail (click a card -> where the work lives) ---------------- */
+function openCard(t){
+  const hp=healthOf(t), vc=vcol(t.v), d=vdir(t.v);
+  $('cmTitle').innerHTML=`${cdot(hp.dot)}${esc(t.text)}`;
+  $('cmHead').style.borderLeft=`5px solid ${vc}`;
+  const files=(t.files||[]).map(f=>`<a href="${esc(f.url)}" target="_blank" style="color:var(--acc)">📎 ${esc(f.name)}</a>`).join('  ');
+  const rep=t.report?`<a href="#" class="cmRep" data-r="${esc(t.report)}" data-t="${esc(t.text)}" style="color:var(--grn)">📄 open report</a>`:'';
+  // what to do, based on state
+  let todo='';
+  if(/blocked|awaiting|paused|confirmation|not approved|needs human/i.test(t.status||'')){
+    todo=`<div style="background:#2b220a;border:1px solid #6d5710;border-radius:8px;padding:10px 12px;margin:10px 0">
+      <b style="color:var(--amber)">⚠ This needs YOU</b><div style="color:var(--dim);font-size:.85rem;margin-top:4px">${esc(t.status)}</div>
+      <div style="font-size:.82rem;margin-top:6px">Decide below — the runner won't touch it until you do.</div></div>`;
+  } else if(t.col==='review'){
+    todo=`<div style="color:var(--dim);font-size:.85rem;margin:8px 0">An agent finished this; it's parked in <b>Review</b> for you to verify. Open the report, then Mark done.</div>`;
+  } else if(t.col==='doing'){
+    todo=`<div style="color:var(--dim);font-size:.85rem;margin:8px 0">In progress. Watch it on the <b>Agents → Live floor</b>.</div>`;
+  }
+  $('cmBody').innerHTML=`
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
+      <span class="chip" style="border-color:${vc}88;color:${vc}">${esc(t.v||'—')}</span>
+      <span class="chip" style="border-color:${hp.c}66;color:${hp.c}">${hp.tag}</span>
+      ${t.mission?'<span class="chip" style="color:#c9b6ff">🎯 mission</span>':''}
+      ${t.agent?`<span class="chip" style="color:#7fb0ff">🤖 ${esc(t.agent)}</span>`:''}
+    </div>
+    ${todo}
+    <div style="font-size:.78rem;color:var(--dim);text-transform:uppercase;letter-spacing:.06em;margin:12px 0 4px">Where the work lives</div>
+    <div style="font-size:.85rem;margin-bottom:4px">${esc(d.what)}</div>
+    <div class="runline"><code style="font-size:.72rem">${esc(d.dir)}</code>
+      <button class="cmOpen" data-dir="${esc(d.dir)}">📂 open folder</button>
+      <button class="cmCopy" data-dir="${esc(d.dir)}">copy path</button></div>
+    ${(rep||files)?`<div style="margin-top:12px;font-size:.85rem">${rep} ${files}</div>`:''}
+    <div style="font-size:.78rem;color:var(--dim);text-transform:uppercase;letter-spacing:.06em;margin:16px 0 6px">Actions</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      ${t.col!=='done'?`<button class="cmAct" data-a="done" data-id="${esc(t.id)}" style="border-color:#2ea043;color:var(--grn)">✓ Mark done</button>`:''}
+      <button class="cmAct" data-a="retry" data-id="${esc(t.id)}">↻ Re-queue</button>
+      <button class="cmAct" data-a="remove" data-id="${esc(t.id)}" data-txt="${esc(t.text)}" style="border-color:#7a2020;color:#ffb3b3">🗑 Remove</button>
+      <button class="cmGoto" data-t="board">→ Board</button>
+    </div>
+    ${t.mission?`
+    <div style="font-size:.78rem;color:var(--dim);text-transform:uppercase;letter-spacing:.06em;margin:18px 0 6px">⚙ Task settings <span style="text-transform:none;letter-spacing:0;font-weight:400">— containerized per-task control</span></div>
+    <div style="border:1px solid var(--line);border-radius:10px;padding:12px 13px">
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:11px;flex-wrap:wrap">
+        <span style="font-size:.8rem;width:82px;color:var(--dim)">Run mode</span>
+        <button class="tsMode" data-v="auto" style="cursor:pointer;border:1px solid var(--line);background:var(--panel2);color:var(--dim);border-radius:7px;padding:5px 11px;font-size:.78rem">🤖 Autopilot</button>
+        <button class="tsMode" data-v="manual" style="cursor:pointer;border:1px solid var(--line);background:var(--panel2);color:var(--dim);border-radius:7px;padding:5px 11px;font-size:.78rem">✋ Manual</button>
+        <span style="font-size:.68rem;color:var(--dim)">autopilot = the runner auto-executes this; manual = human-only</span>
+      </div>
+      <div style="margin-bottom:11px">
+        <div style="font-size:.8rem;color:var(--dim);margin-bottom:4px">📝 Prompt add-on <span style="font-size:.7rem">— extra instructions injected into THIS task's run</span></div>
+        <textarea id="tsAddon" rows="3" placeholder="e.g. Use the AutoPalette brand palette; QR under 3cm; do NOT touch firestore.rules." style="width:100%;box-sizing:border-box;background:#080a0f;border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:7px 9px;font:inherit;font-size:.8rem;resize:vertical"></textarea>
+      </div>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+        <span style="font-size:.8rem;color:var(--dim)">Executor</span>
+        <select id="tsExec" style="background:#080a0f;border:1px solid var(--line);color:var(--ink);border-radius:7px;padding:5px 8px;font:inherit;font-size:.78rem"><option value="claude">Claude (headless)</option><option value="failover">Failover chain</option></select>
+        <span style="font-size:.8rem;color:var(--dim)">Max attempts</span>
+        <input id="tsMax" type="number" min="1" max="9" style="width:56px;background:#080a0f;border:1px solid var(--line);color:var(--ink);border-radius:7px;padding:5px 7px;font:inherit;font-size:.78rem">
+      </div>
+      <div style="display:flex;gap:8px">
+        <button id="tsSave" style="cursor:pointer;border:1px solid #2ea043;background:var(--panel2);color:var(--grn);border-radius:7px;padding:6px 13px;font-size:.78rem;font-weight:600">💾 Save settings</button>
+        <button id="tsClear" style="cursor:pointer;border:1px solid #7a2020;background:var(--panel2);color:#ffb3b3;border-radius:7px;padding:6px 13px;font-size:.78rem">↺ Reset to default</button>
+      </div>
+    </div>`:''}`;
+  $('cardModal').style.display='block';
+  const bd=$('cmBody');
+  if(t.mission){
+    let tsMode=(t.settings&&t.settings.mode)||'manual';
+    const paintMode=()=>bd.querySelectorAll('.tsMode').forEach(b=>{ const on=b.dataset.v===tsMode; b.style.borderColor=on?(tsMode==='auto'?'#2ea043':'#d29922'):'var(--line)'; b.style.color=on?(tsMode==='auto'?'#7ee787':'#ffd479'):'var(--dim)'; b.style.background=on?(tsMode==='auto'?'rgba(46,160,67,.12)':'rgba(210,153,34,.12)'):'var(--panel2)'; });
+    bd.querySelectorAll('.tsMode').forEach(b=>b.onclick=()=>{ tsMode=b.dataset.v; paintMode(); });
+    if(bd.querySelector('#tsAddon')) bd.querySelector('#tsAddon').value=(t.settings&&t.settings.promptAddon)||'';
+    if(bd.querySelector('#tsExec')) bd.querySelector('#tsExec').value=(t.settings&&t.settings.executor)||'claude';
+    if(bd.querySelector('#tsMax')) bd.querySelector('#tsMax').value=(t.settings&&t.settings.maxAttempts)||2;
+    paintMode();
+    bd.querySelector('#tsSave')?.addEventListener('click',async()=>{
+      const settings={mode:tsMode, promptAddon:bd.querySelector('#tsAddon').value.trim(), executor:bd.querySelector('#tsExec').value, maxAttempts:parseInt(bd.querySelector('#tsMax').value)||2};
+      const r=await (await fetch('/api/task/settings',{method:'POST',body:JSON.stringify({id:t.id,settings})})).json();
+      if(r.ok){ t.settings=r.settings; toast('✓ task settings saved'); if(typeof renderBoard==='function')renderBoard(); } else toast('save failed: '+(r.error||'?'));
+    });
+    bd.querySelector('#tsClear')?.addEventListener('click',async()=>{
+      if(!confirm('Reset this task to default (clears mode, prompt add-on, executor)?'))return;
+      const r=await (await fetch('/api/task/settings',{method:'POST',body:JSON.stringify({id:t.id,clear:true})})).json();
+      if(r.ok){ delete t.settings; toast('↺ settings reset'); $('cardModal').style.display='none'; if(typeof renderBoard==='function')renderBoard(); } else toast('reset failed');
+    });
+  }
+  bd.querySelector('.cmOpen')?.addEventListener('click',async(e)=>{
+    const r=await (await fetch('/api/open-folder',{method:'POST',body:JSON.stringify({path:e.target.dataset.dir})})).json();
+    toast(r.ok?'📂 opened in Explorer':'couldn\'t open: '+(r.error||'?'));
+  });
+  bd.querySelector('.cmCopy')?.addEventListener('click',(e)=>copy(e.target.dataset.dir));
+  bd.querySelector('.cmRep')?.addEventListener('click',(e)=>{e.preventDefault();openReport(e.target.dataset.r,e.target.dataset.t);});
+  bd.querySelectorAll('.cmAct').forEach(b=>b.onclick=async()=>{
+    if(b.dataset.a==='remove'&&!confirm('Remove "'+b.dataset.txt+'"?'))return;
+    const r=await (await fetch('/api/taskhealth/mitigate',{method:'POST',body:JSON.stringify({id:b.dataset.id,action:b.dataset.a})})).json();
+    toast(r.ok?'✓ '+b.dataset.a:'failed'); $('cardModal').style.display='none'; if(typeof pollState==='function')pollState(); if(typeof pollStuck==='function')pollStuck();
+  });
+  bd.querySelector('.cmGoto')?.addEventListener('click',()=>{ $('cardModal').style.display='none'; document.querySelector('#tabs button[data-t="board"]').click(); });
+}
+$('cmClose').onclick=()=>$('cardModal').style.display='none';
+$('cardModal').addEventListener('click',e=>{if(e.target===$('cardModal'))$('cardModal').style.display='none';});
+document.addEventListener('keydown',e=>{if(e.key==='Escape')$('cardModal').style.display='none';});
+
+/* ---------------- in-flight progress / ETA ---------------- */
+async function pollFlight(){
+  try{
+    const f=await (await fetch('/api/running')).json();
+    const hdr=$('flightHdr'), panel=$('flightPanel');
+    const items=f.missions||[];
+    if(!items.length){ hdr.style.display='none'; panel.style.display='none'; return; }
+    hdr.style.display=''; panel.style.display='';
+    panel.innerHTML=items.map(m=>{
+      const vc=vcol(m.v), bar=m.blocked?'#d29922':(m.pct>=100?'#3fb950':'#1f6feb');
+      return `<div style="padding:8px 0;border-bottom:1px solid var(--line);margin-bottom:8px">
+        <div style="display:flex;gap:8px;align-items:baseline">
+          <span class="chip" style="border-color:${vc}88;color:${vc}">${esc(m.v||'—')}</span>
+          <b style="flex:1">${esc(m.text)}</b>
+          <b style="color:${bar}">${m.pct}%</b>
+        </div>
+        <div style="height:8px;background:#080a0f;border:1px solid var(--line);border-radius:6px;overflow:hidden;margin:6px 0">
+          <div style="height:100%;width:${m.pct}%;background:${bar};transition:width .4s"></div>
+        </div>
+        <div style="display:flex;gap:14px;font-size:.74rem;color:var(--dim)">
+          <span>${esc(m.sub)}</span><span>⏱ ${m.elapsedMin}m elapsed</span>
+          <span>ETA: <b style="color:${m.blocked?'var(--amber)':'var(--ink)'}">${esc(m.eta)}</b></span>
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">
+          <button class="flightHeal" data-id="${esc(m.id)}" style="border-color:#e3b34166;color:#e3b341" title="Diagnose WHY this is stuck and auto-fix the plumbing (e.g. restart a hung runner), with an honest reason">🩺 Diagnose &amp; fix</button>
+          <button class="flightBtn" data-id="${esc(m.id)}" data-act="check"   style="border-color:#3fb95066;color:#3fb950"  title="You verified it against reality - mark it done and clear it from in-flight">✓ Check</button>
+          <button class="flightBtn" data-id="${esc(m.id)}" data-act="boost"   style="border-color:#1f6feb66;color:#58a6ff"  title="More effort / fast-forward - jump this mission to the front of the run queue so it runs next">▶▶ Boost</button>
+          <button class="flightBtn" data-id="${esc(m.id)}" data-act="rethink" style="border-color:#a371f766;color:#a371f7"  title="The approach is wrong - send it back to Backlog for a fresh plan">↻ Rethink</button>
+          <button class="flightBtn" data-id="${esc(m.id)}" data-act="broken"  style="border-color:#f8514966;color:#f85149"  title="This mission is broken/stuck - flag it and surface it in the Stuck tracker with fix options">⚠ Broken</button>
+        </div></div>`;
+    }).join('') + (f.liveRuns&&f.liveRuns.length?`<div style="font-size:.76rem;color:var(--grn);margin-top:4px"><span class="pulse"></span> ${f.liveRuns.length} workflow run(s) live now</div>`:'');
+    panel.querySelectorAll('.flightBtn').forEach(b=>b.onclick=async()=>{
+      const act=b.dataset.act;
+      if((act==='broken'||act==='rethink') && !confirm(act==='broken'?'Flag this mission as broken/stuck?':'Send this mission back for a fresh re-plan?'))return;
+      b.disabled=true;
+      try{
+        const r=await (await fetch('/api/mission/act',{method:'POST',body:JSON.stringify({id:b.dataset.id,act})})).json();
+        toast(r.ok?('✓ '+(r.msg||act)):('failed: '+(r.error||'?')));
+      }catch(e){ toast('failed: '+e.message); }
+      pollFlight(); if(typeof pollStuck==='function')pollStuck(); if(typeof pollState==='function')pollState();
+    });
+    panel.querySelectorAll('.flightHeal').forEach(b=>b.onclick=async()=>{
+      const orig=b.innerHTML; b.disabled=true; b.textContent='🩺 diagnosing…';
+      try{
+        const r=await (await fetch('/api/mission/heal',{method:'POST',body:JSON.stringify({id:b.dataset.id})})).json();
+        if(!r.ok){ toast('failed: '+(r.error||'?')); }
+        else{
+          const parts=['DIAGNOSIS: '+r.reason];
+          if(r.fix) parts.push((r.applied?'✓ FIX APPLIED: ':'FIX: ')+r.fix);
+          if(r.recommend) parts.push('→ '+r.recommend);
+          if(r.runner) parts.push('runner engine: '+r.runner.state+' ('+r.runner.detail+')');
+          if(r.note) parts.push('⚠ '+r.note);
+          alert(parts.join('\n\n'));
+          toast(r.applied?'✓ fix applied':'diagnosed');
+        }
+      }catch(e){ toast('failed: '+e.message); }
+      b.disabled=false; b.innerHTML=orig;
+      pollFlight(); if(typeof pollStuck==='function')pollStuck();
+    });
+  }catch(e){}
+}
+
+/* ---------------- Stuck-task tracker ---------------- */
+const SEVC={high:'var(--red)',med:'var(--amber)',low:'var(--dim)'};
+async function pollStuck(){
+  try{
+    const h=await (await fetch('/api/taskhealth')).json();
+    const hdr=$('stuckHdr'), panel=$('stuckPanel');
+    if(!h.stuck.length){ hdr.style.display='none'; panel.style.display='none'; return; }
+    hdr.style.display=''; panel.style.display='';
+    panel.innerHTML=h.stuck.map(s=>`
+      <div style="border-bottom:1px solid var(--line);padding:8px 0;margin-bottom:8px">
+        <div style="display:flex;gap:8px;align-items:baseline">
+          <span class="chip" style="color:${SEVC[s.severity]};border-color:${SEVC[s.severity]}">${s.category}</span>
+          <b style="flex:1">${esc(s.text)}</b>
+        </div>
+        <div style="color:var(--dim);font-size:.82rem;margin:4px 0 6px">${esc(s.reason)}</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          ${s.mitigations.map(m=>`<button class="stuckBtn" data-id="${esc(s.id)}" data-act="${m.action}" data-txt="${esc(s.text)}">${esc(m.label)}</button>`).join('')}
+        </div>
+      </div>`).join('');
+    panel.querySelectorAll('.stuckBtn').forEach(b=>b.onclick=async()=>{
+      if(b.dataset.act==='remove' && !confirm('Remove "'+b.dataset.txt+'" from the board?'))return;
+      b.disabled=true;
+      const r=await (await fetch('/api/taskhealth/mitigate',{method:'POST',body:JSON.stringify({id:b.dataset.id,action:b.dataset.act})})).json();
+      toast(r.ok?`✓ ${b.dataset.act}`:'failed: '+(r.error||'?'));
+      pollStuck(); if(typeof pollState==='function')pollState();
+    });
+  }catch(e){}
+}
+
+/* ---------------- Logs tab ---------------- */
+async function pollLogs(){
+  try{
+    const a=await (await fetch('/api/logs/approvals')).json();
+    const s=a.stats;
+    $('apprStats').innerHTML=`
+      <div class="stat"><div class="v">${s.total}</div><div class="k">total asks</div></div>
+      <div class="stat"><div class="v" style="color:var(--grn)">${s.approved}</div><div class="k">approved${s.auto?` (${s.auto} auto)`:''}</div></div>
+      <div class="stat"><div class="v" style="color:var(--red)">${s.denied}</div><div class="k">denied</div></div>
+      <div class="stat"><div class="v" style="color:var(--amber)">${s.pending}</div><div class="k">still waiting</div></div>`;
+    $('apprTimeline').innerHTML=a.rows.length? a.rows.map(r=>{
+      const c=r.status==='approved'?'var(--grn)':r.status==='denied'?'var(--red)':'var(--amber)';
+      const d=r.ts?new Date(r.ts*1000).toLocaleString([],{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}):'';
+      return `<div class="nbarow" style="align-items:flex-start"><span class="sc" style="color:${c}">${r.status==='approved'?'✓':r.status==='denied'?'✕':'…'}</span>
+        <span style="flex:1"><span class="rt">${esc(r.title)}</span> <span style="color:var(--dim);font-size:.72rem">${d}</span><br>
+        <span style="color:${c};font-size:.8rem">${esc(r.explain)}</span> <span style="color:var(--dim);font-size:.74rem">— by ${esc(r.who)}</span><br>
+        <span style="color:var(--dim);font-size:.74rem">${esc(r.detail)}</span></span></div>`;
+    }).join('') : '<span style="color:var(--dim)">No approvals yet. They appear here once a background mission or provider-switch asks for your OK. Nothing is running right now, so this is empty — that\'s normal.</span>';
+    const files=await (await fetch('/api/logs/files')).json();
+    $('logFiles').innerHTML=files.map(f=>`<div class="panel" style="margin-bottom:10px">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><b>${esc(f.label)}</b>
+        <span style="color:var(--dim);font-size:.72rem">${f.file?esc(f.file):'(no file yet)'}</span></div>
+      <div style="color:var(--dim);font-size:.78rem;margin-bottom:8px">${esc(f.explain)}</div>
+      ${f.lines&&f.lines.length?`<pre style="background:#080a0f;border:1px solid var(--line);border-radius:8px;padding:10px;overflow-x:auto;max-height:240px;overflow-y:auto;font-size:.72rem;line-height:1.5">${f.lines.map(l=>esc(l)).join('\n')}</pre>`:'<span style="color:var(--dim);font-size:.78rem">— nothing logged yet</span>'}
+    </div>`).join('');
+  }catch(e){ $('apprTimeline').innerHTML='<span style="color:var(--dim)">logs unavailable</span>'; }
+}
+$('logRefresh')&&($('logRefresh').onclick=pollLogs);
+document.querySelector('#tabs button[data-t="logs"]').addEventListener('click',pollLogs);
+
+/* doctor */
+const SICON={ok:'🟢',warn:'🟡',fail:'🔴'};
+$('docbtn').addEventListener('click', async ()=>{
+  $('docpanel').style.display='block';
+  $('docsum').textContent='running diagnostics + safe fixes…';
+  $('docrows').innerHTML=''; $('docbtn').disabled=true;
+  try{
+    const r=await (await fetch('/api/doctor?fix=1')).json();
+    $('docsum').textContent=`${SICON.ok} ${r.summary.ok} ok · ${SICON.warn} ${r.summary.warn} warn · ${SICON.fail} ${r.summary.fail} fail · ${(r.tookMs/1000).toFixed(1)}s`;
+    $('docrows').innerHTML=r.results.map(x=>`<tr><td>${SICON[x.status]||'⚪'}</td><td><b>${x.name}</b></td><td style="color:var(--dim)">${esc(x.detail||'')}</td><td style="color:${x.fix?'var(--grn)':'var(--dim)'}">${esc(x.fix||'—')}</td></tr>`).join('');
+    pollSvc(); pollSummary();
+  }catch(e){ $('docsum').textContent='doctor failed: '+e.message; }
+  $('docbtn').disabled=false;
+});
+$('docclose').addEventListener('click',()=>$('docpanel').style.display='none');
+
+/* ---------------- Abliterated (local uncensored) tab ---------------- */
+let ABLIT_IMG=null;
+async function pollAblit(){
+  try{
+    const s=await (await fetch('/api/ablit/state')).json();
+    $('ablitOllama').innerHTML = s.ollama
+      ? `🟢 Ollama running · ${s.local.length} local model(s): ${s.local.map(esc).join(', ')||'none pulled yet'}`
+      : '🔴 Ollama not running — start it from Analytics → Provider Status (Gemma → ▶ Start Ollama), or run <code>ollama serve</code>.';
+    $('ablitCatalog').innerHTML=(s.catalog||[]).map(m=>`<div class="card">
+      <div class="t">${esc(m.name)} <span class="chip" style="margin-left:auto;color:${m.pulled?'var(--grn)':(m.kind==='vision'?'#c9b6ff':'var(--dim)')}">${m.pulled?'pulled ✓':(m.kind==='vision'?'👁 vision':'text')}</span></div>
+      <div class="d" style="font-size:.75rem">${esc(m.why)}</div>
+      <div style="font-size:.68rem;color:#8b949e;margin-top:3px">💾 ${esc(m.size)}</div>
+      <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;align-items:center">
+        ${m.pulled?`<button class="ablitUse" data-m="${esc(m.id.replace('hf.co/','').split('/').pop())}" style="border-color:#2ea043;color:var(--grn)">💬 use</button>`:`<button class="ablitPull" data-m="${esc(m.id)}:${esc(m.quant)}" style="border-color:#a371f755;color:#c9b6ff">⬇ pull</button>`}
+        <a href="https://huggingface.co/${esc(m.id.replace('hf.co/',''))}" target="_blank" rel="noopener" style="font-size:.72rem;color:#58a6ff">HF ↗</a>
+      </div></div>`).join('');
+    $('ablitCatalog').querySelectorAll('.ablitPull').forEach(b=>b.onclick=()=>ablitPull(b.dataset.m));
+    $('ablitCatalog').querySelectorAll('.ablitUse').forEach(b=>b.onclick=()=>{ const opt=[...$('ablitModel').options].find(o=>o.value.includes(b.dataset.m)); if(opt)$('ablitModel').value=opt.value; $('ablitPrompt').focus(); toast('using '+b.dataset.m); });
+    $('ablitModel').innerHTML=s.local.length?s.local.map(n=>`<option>${esc(n)}</option>`).join(''):'<option value="">(pull a model first)</option>';
+  }catch(e){ $('ablitCatalog').innerHTML='<span style="color:var(--dim)">unavailable</span>'; }
+}
+async function ablitPull(model){
+  try{ const r=await (await fetch('/api/ablit/pull',{method:'POST',body:JSON.stringify({model})})).json();
+    toast(r.ok?('⬇ '+(r.msg||'pulling')):'failed: '+(r.error||'?'));
+  }catch(e){ toast('pull failed'); }
+}
+$('hfBtn').onclick=async()=>{
+  const q=$('hfQ').value.trim(); $('hfResults').innerHTML='<span style="color:var(--dim)">searching HuggingFace…</span>';
+  try{ const d=await (await fetch('/api/hf/search?q='+encodeURIComponent(q))).json();
+    const rs=d.results||[];
+    $('hfResults').innerHTML=rs.length?rs.map(m=>`<div style="display:flex;gap:8px;align-items:center;padding:5px 2px;border-bottom:1px solid var(--line)">
+      <span style="flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"><a href="https://huggingface.co/${esc(m.id)}" target="_blank" rel="noopener" style="color:var(--ink);text-decoration:none">${esc(m.id)}</a> <span style="color:var(--dim);font-size:.72rem">↓${(m.downloads||0).toLocaleString()}${m.pipeline?(' · '+esc(m.pipeline)):''}</span></span>
+      ${m.gguf?`<button class="hfPull" data-m="hf.co/${esc(m.id)}:Q4_K_M" style="border-color:#a371f755;color:#c9b6ff;font-size:.72rem">⬇ pull</button>`:'<span style="font-size:.64rem;color:var(--dim)">not GGUF</span>'}
+    </div>`).join(''):'<span style="color:var(--dim)">no results</span>';
+    $('hfResults').querySelectorAll('.hfPull').forEach(b=>b.onclick=()=>ablitPull(b.dataset.m));
+  }catch(e){ $('hfResults').innerHTML='<span style="color:var(--red)">search failed</span>'; }
+};
+$('hfQ').addEventListener('keydown',e=>{ if(e.key==='Enter')$('hfBtn').click(); });
+$('ablitImgBtn').onclick=()=>$('ablitImg').click();
+$('ablitImg').addEventListener('change',e=>{ const f=e.target.files[0]; if(!f)return; const rd=new FileReader(); rd.onload=()=>{ ABLIT_IMG=rd.result.split(',')[1]; $('ablitImgName').textContent='🖼 '+f.name; }; rd.readAsDataURL(f); });
+$('ablitSend').onclick=async()=>{
+  const model=$('ablitModel').value, prompt=$('ablitPrompt').value.trim();
+  if(!model){ toast('pull a model first'); return; }
+  if(!prompt){ toast('type a prompt'); return; }
+  const out=$('ablitOut'); out.style.color='var(--dim)'; out.textContent='running locally on '+model+'… (first run loads the model, can take a moment)'; $('ablitSend').disabled=true;
+  try{ const r=await (await fetch('/api/ablit/chat',{method:'POST',body:JSON.stringify({model,prompt,image:ABLIT_IMG})})).json();
+    if(r.ok){ out.style.color='var(--ink)'; out.textContent=(r.text||'(empty response)')+`\n\n— ${model} · ${r.ms}ms · 100% local`; }
+    else { out.style.color='var(--amber)'; out.textContent='✕ '+(r.error||'failed'); }
+  }catch(e){ out.style.color='var(--red)'; out.textContent='error — is Ollama running?'; }
+  $('ablitSend').disabled=false; ABLIT_IMG=null; $('ablitImgName').textContent='';
+};
+
+/* boot */
+(async()=>{
+  await loadConfig(); await loadState(); renderBoard();
+  pollSummary(); pollRuns(); pollSvc(); pollWork(); pollHeat(); pollFeed(); pollNba();
+  setInterval(pollSummary,10000); setInterval(pollRuns,6000); setInterval(pollSvc,15000);
+  setInterval(pollWork,30000); setInterval(pollHeat,60000); setInterval(pollFeed,4000); setInterval(pollNba,20000); setInterval(pollState,3000);
+  pollApprovals(); setInterval(pollApprovals,4000); pollTerminals(); setInterval(pollTerminals,8000);
+  pollStuck(); setInterval(pollStuck,8000); pollFlight(); setInterval(pollFlight,6000);
+  pollGov(); setInterval(pollGov,15000); pollProviders(false); setInterval(()=>pollProviders(false),90000);
+  pollMode(); setInterval(pollMode,12000);
+  pollVersion();
+})();
+</script>
+
+<!-- API/login error wizard -->
+<div id="fixModal" style="display:none;position:fixed;inset:0;z-index:34;background:rgba(5,7,10,.8);backdrop-filter:blur(3px)">
+  <div style="max-width:560px;margin:6vh auto;max-height:86vh;display:flex;flex-direction:column;background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:hidden">
+    <div style="display:flex;align-items:center;gap:10px;padding:12px 18px;border-bottom:1px solid var(--line)">
+      <b id="fixTitle" style="font-size:1rem">🩹 Troubleshoot</b>
+      <button id="fixClose" style="margin-left:auto;border:1px solid var(--line);background:var(--panel2);color:var(--dim);border-radius:6px;padding:2px 9px;cursor:pointer">close</button>
+    </div>
+    <div id="fixBody" style="padding:14px 18px;overflow-y:auto"></div>
+  </div>
+</div>
+<script>
+  document.getElementById('fixClose').onclick=()=>document.getElementById('fixModal').style.display='none';
+  document.getElementById('fixModal').addEventListener('click',e=>{ if(e.target===document.getElementById('fixModal'))document.getElementById('fixModal').style.display='none'; });
+</script>
+
+<!-- ============ HELM RADIO (mood radio → plays in YOUR YouTube Premium) ============ -->
+<div id="musicWidget" style="position:fixed;right:16px;bottom:16px;z-index:40">
+  <button id="mwToggle" style="display:flex;align-items:center;gap:7px;background:linear-gradient(135deg,#1f6feb,#a371f7);border:none;color:#fff;font-weight:600;padding:9px 14px;border-radius:22px;box-shadow:0 6px 20px rgba(0,0,0,.45);cursor:pointer;font-size:.82rem">🎵 <span id="mwNow" style="max-width:190px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">HELM Radio</span></button>
+  <div id="mwPanel" style="display:none;width:330px;background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:hidden;box-shadow:0 14px 46px rgba(0,0,0,.6)">
+    <div style="display:flex;align-items:center;gap:8px;padding:9px 12px;border-bottom:1px solid var(--line)">
+      <b style="font-size:.86rem">🎵 HELM Radio</b>
+      <span id="mwMood" class="chip" title="Claude's mood — derived live from your dashboard state" style="font-size:.62rem;cursor:help">mood…</span>
+      <button id="mwClose" title="minimize" style="margin-left:auto;border:1px solid var(--line);background:var(--panel2);color:var(--dim);border-radius:6px;padding:2px 9px;cursor:pointer">–</button>
+    </div>
+    <div style="padding:11px 12px">
+      <div id="mwTitle" style="font-size:.8rem;font-weight:600;color:var(--ink);margin-bottom:9px">pick a vibe ↓</div>
+      <button id="mwPlay" style="width:100%;display:flex;align-items:center;justify-content:center;gap:8px;background:linear-gradient(135deg,#ff0000,#cc0000);border:none;color:#fff;font-weight:700;padding:10px;border-radius:10px;cursor:pointer;font-size:.86rem;box-shadow:0 4px 14px rgba(255,0,0,.25)">▶ Play in YouTube <span style="font-weight:400;font-size:.68rem;opacity:.85">(your Premium · ad-free)</span></button>
+      <div id="mwQueue" style="margin:9px 0;max-height:132px;overflow-y:auto"></div>
+      <div style="font-size:.62rem;color:var(--dim);text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px">vibe</div>
+      <div id="mwArtists" style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px"></div>
+      <a id="mwYT" href="https://www.youtube.com/results?search_query=Fred+again.." target="_blank" rel="noopener" style="font-size:.7rem;color:#58a6ff;display:block;text-decoration:none">↗ browse this vibe on YouTube</a>
+      <div style="font-size:.6rem;color:var(--dim);margin-top:6px;line-height:1.4">These artists' songs <b>block in-app embedding</b> (label policy — verified). So HELM curates the mood queue and plays it in <b>your</b> YouTube, where Premium makes it ad-free &amp; every track works. Reuses one "HELM Radio" tab.</div>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+  const MUSIC={
+    fred_again:{name:'Fred again..',emoji:'🌊',search:'https://www.youtube.com/results?search_query=Fred+again..',videos:[
+      {id:'rNv8K8AYGi8',t:'leavemealone (w/ Baby Keem)'},{id:'i8Vgo5S-_NM',t:'Rumble (w/ Skrillex, Flowdan)'},{id:'yMJswjcD8Fg',t:'Marea (We’ve Lost Dancing)'},{id:'Q22MCFC0CP0',t:'Turn On The Lights again..'},{id:'Cl6Rz1Uvi2M',t:'Delilah (pull me out of this)'},{id:'zBp7KBmgsdU',t:'Jungle'},{id:'0bVFEOb39vk',t:'places to be'}]},
+    lil_peep:{name:'Lil Peep',emoji:'🖤',search:'https://www.youtube.com/results?search_query=Lil+Peep',videos:[
+      {id:'m8QQR-wQA0I',t:'Star Shopping'},{id:'fePnUenEZPk',t:'beamer boy'},{id:'zOujzvtwZ6M',t:'Awful Things (ft. Lil Tracy)'},{id:'3rkJ3L5Ce80',t:'benz truck'},{id:'WvV5TbJc9tQ',t:'Save That Shit'},{id:'9374qezI4bY',t:'The Brightside'},{id:'C4gVlt46voo',t:'the way i see things'}]},
+    juice_wrld:{name:'Juice WRLD',emoji:'💔',search:'https://www.youtube.com/results?search_query=Juice+WRLD',videos:[
+      {id:'mzB1VGEGcSU',t:'Lucid Dreams'},{id:'h3EJICKwITw',t:'All Girls Are The Same'},{id:'Sw5fNI400E4',t:'Bandit (ft. NBA Youngboy)'},{id:'ZengOKCUBHo',t:'Righteous'},{id:'dIzgiclddlM',t:'Legends'},{id:'5Di20x6vVVU',t:'Come & Go (w/ Marshmello)'}]},
+    eminem:{name:'Eminem',emoji:'🔥',search:'https://www.youtube.com/results?search_query=Eminem',videos:[
+      {id:'j5-yKhDd64s',t:'Not Afraid'},{id:'uelHwf8o7_U',t:'Love The Way You Lie (ft. Rihanna)'},{id:'S9bCLPwzSC0',t:'Mockingbird'},{id:'YVkUvmDQ3HY',t:'Without Me'},{id:'9oZf8f5q-dQ',t:'Rap God'},{id:'7YuAzR2XVAM',t:'Lose Yourself'},{id:'FA2j9qlFyDU',t:'The Real Slim Shady'},{id:'r_0JjYUe5jo',t:'Godzilla (ft. Juice WRLD)'}]},
+    miley_cyrus:{name:'Miley Cyrus',emoji:'✨',search:'https://www.youtube.com/results?search_query=Miley+Cyrus',videos:[
+      {id:'G7KNmW9a75Y',t:'Flowers'},{id:'My2FRPA3Gf8',t:'Wrecking Ball'},{id:'LrUvu1mlWco',t:'We Can’t Stop'},{id:'M11SvDtPBhA',t:'Party In The U.S.A.'},{id:'8j9zMok6two',t:'Malibu'},{id:'aS1no1myeTM',t:'Midnight Sky'},{id:'NG2zyeVRcbs',t:'The Climb'}]},
+  };
+  const MOOD_ARTISTS={focus:['fred_again'],hype:['eminem','juice_wrld'],chill:['lil_peep','juice_wrld'],party:['miley_cyrus','fred_again','eminem']};
+  const MOOD_LABEL={focus:'🎯 focus',hype:'🔥 hype',chill:'🌙 chill',party:'🎉 party'};
+  const $$=id=>document.getElementById(id);
+  let queue=[],curSel='auto',prefs={artist:'auto',autoMood:true,volume:60};
+
+  const shuffle=a=>{const x=a.slice();for(let i=x.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[x[i],x[j]]=[x[j],x[i]];}return x;};
+  function buildQueue(keys){ let all=[]; keys.forEach(k=>{ if(MUSIC[k]) all=all.concat(MUSIC[k].videos.map(v=>({...v,artist:k}))); }); return shuffle(all); }
+  // YouTube's watch_videos endpoint plays an ad-hoc queue of video IDs in the user's own session.
+  function queueUrl(q){ return 'https://www.youtube.com/watch_videos?video_ids='+q.slice(0,45).map(v=>v.id).join(','); }
+  function trackUrl(id){ return 'https://www.youtube.com/watch?v='+id; }
+  function openYT(url){ window.open(url,'helmRadio'); } // reuse one named tab
+
+  function renderArtistChips(){
+    const chips=[['auto','🤖 Auto (mood)'],['shuffle','🔀 Shuffle all']].concat(Object.keys(MUSIC).map(k=>[k,MUSIC[k].emoji+' '+MUSIC[k].name]));
+    $$('mwArtists').innerHTML=chips.map(([k,label])=>`<button class="mwArt" data-k="${k}" style="font-size:.66rem;padding:2px 8px;border-radius:999px;cursor:pointer;border:1px solid ${curSel===k?'#a371f7':'var(--line)'};background:${curSel===k?'rgba(163,113,247,.15)':'var(--panel2)'};color:${curSel===k?'#a371f7':'var(--dim)'}">${label}</button>`).join('');
+    $$('mwArtists').querySelectorAll('.mwArt').forEach(b=>b.onclick=()=>select(b.dataset.k));
+  }
+  function renderQueue(){
+    $$('mwQueue').innerHTML=queue.map(v=>`<div class="mwTrk" data-id="${v.id}" title="play this track in your YouTube" style="display:flex;gap:7px;align-items:center;padding:3px 4px;border-radius:6px;cursor:pointer;font-size:.72rem"><span>${MUSIC[v.artist].emoji}</span><span style="flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--ink)">${v.t}</span><span style="color:#ff5252">▶</span></div>`).join('');
+    $$('mwQueue').querySelectorAll('.mwTrk').forEach(b=>{ b.onmouseenter=()=>b.style.background='var(--panel2)'; b.onmouseleave=()=>b.style.background='none'; b.onclick=()=>openYT(trackUrl(b.dataset.id)); });
+  }
+  function setTitleFor(key,mood){
+    const label = key==='auto' ? (MOOD_LABEL[mood]||mood)+' radio' : key==='shuffle' ? '🔀 Shuffle · all artists' : (MUSIC[key].emoji+' '+MUSIC[key].name);
+    $$('mwTitle').textContent=label+' — '+queue.length+' tracks'; $$('mwNow').textContent=label;
+  }
+
+  async function select(key){
+    curSel=key;
+    let keys, mood;
+    if(key==='auto'){ const m=await refreshMood(); mood=m.mood; keys=MOOD_ARTISTS[m.mood]||['fred_again']; $$('mwYT').href=MUSIC[keys[0]].search; }
+    else if(key==='shuffle'){ keys=Object.keys(MUSIC); $$('mwYT').href='https://www.youtube.com/results?search_query=Fred+again..+Lil+Peep+Juice+WRLD+Eminem+Miley+Cyrus'; }
+    else { keys=[key]; $$('mwYT').href=MUSIC[key].search; }
+    queue=buildQueue(keys);
+    renderArtistChips(); renderQueue(); setTitleFor(key,mood);
+    persist();
+  }
+
+  async function refreshMood(){
+    try{ const m=await (await fetch('/api/mood')).json();
+      $$('mwMood').textContent=MOOD_LABEL[m.mood]||m.mood;
+      $$('mwMood').title='Claude’s mood: '+m.mood+' — '+m.reason+' (auto-derived from your dashboard). Affects the 🤖 Auto queue.';
+      return m;
+    }catch(e){ return {mood:'focus',reason:'default'}; }
+  }
+  async function persist(){ try{ await fetch('/api/music',{method:'POST',body:JSON.stringify({artist:curSel,autoMood:curSel==='auto'})}); }catch(e){} }
+
+  // ---- controls ----
+  $$('mwToggle').onclick=()=>{ const open=$$('mwPanel').style.display!=='none'; $$('mwPanel').style.display=open?'none':'block'; };
+  $$('mwClose').onclick=()=>{ $$('mwPanel').style.display='none'; };
+  $$('mwPlay').onclick=()=>{ if(!queue.length){ select(curSel||'auto').then(()=>openYT(queueUrl(queue))); return; } openYT(queueUrl(queue)); };
+
+  // ---- init ----
+  (async function(){
+    try{ const p=await (await fetch('/api/music')).json(); prefs={...prefs,...p}; }catch(e){}
+    curSel=prefs.artist||'auto';
+    await select(curSel);              // builds the queue + primes everything for one-click play
+    setInterval(refreshMood,60000);
+  })();
+})();
+</script>
+</body>
+</html>

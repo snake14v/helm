@@ -1,0 +1,45 @@
+# HELM — never publish personal/runtime data. Only source ships.
+# --- per-machine config (your ventures, paths, user) - config.example.json ships instead ---
+config.json
+runtime.json
+# --- your data (contains task text, phone numbers, client names, usage) ---
+state.json
+state.json.bak
+approvals.json
+budgets.json
+usage-cache.json
+*.log
+day-launcher.log
+
+# --- runtime / generated dirs (personal artifacts) ---
+runner-logs/
+failover-logs/
+reports/
+attachments/
+ctx-pages/
+agent-archive/
+__pycache__/
+*.pyc
+
+# --- internal notes (reference private ventures) ---
+SPRINT-HANDOFF.md
+
+# --- secrets: never, under any circumstance ---
+.env
+*.key
+*secret*
+*token*
+*.pem
+settings.local.json
+
+# graphify outputs (contain memory/venture content)
+graph-corpus/
+graph-vault/
+graphify-out/
+.graphify_*
+_g_*.py
+.g_*.json
+
+# stray generated dir (not part of HELM)
+brag-output/
+.playwright-mcp/
