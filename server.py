@@ -365,57 +365,79 @@ def mood():
             "signals": {"severity": sev, "runningMissions": nrun, "stuckHigh": stuck, "hour": hr}}
 
 
-def _panel(pid, label, state, spin, detail="", metric="", level=None, kind="gear"):
+def _panel(pid, label, state, spin, detail="", metric="", level=None, kind="gear", actions=None):
     # state: run(green,working) | idle(dim,ok-but-quiet) | warn(amber) | down(red). spin: is it turning?
+    # actions: [{label, kind: post|open|tab|reload, url?, body?, tab?}] — the click-to-control menu.
     return {"id": pid, "label": label, "state": state, "spin": bool(spin), "detail": detail[:60],
-            "metric": metric, "level": level, "kind": kind}
+            "metric": metric, "level": level, "kind": kind, "actions": actions or []}
 
 _panels_cache = {"t": 0, "svc": None}
 
 def health_panels():
-    """Factory-style 'glass panels' — one per subsystem, showing if it's SPINNING (working) at a glance."""
+    """Factory-style 'glass panels' — one per subsystem, showing if it's SPINNING at a glance, and
+    carrying its own click-to-control actions (engage the operator, restart the runner, arm guardian…)."""
     now = time.time()
     P = []
-    P.append(_panel("server", "SERVER", "run", True, "stdlib http.server :8799", "online"))
+    P.append(_panel("server", "SERVER", "run", True, "stdlib http.server :8799", "online",
+                    actions=[{"label": "↻ Reload dashboard", "kind": "reload"},
+                             {"label": "Open in browser ↗", "kind": "open", "url": "http://localhost:8799"}]))
     st = events_mod.streams()
     P.append(_panel("sse", "LIVE PUSH", "run" if st else "idle", st, f"SSE stream v{events_mod.version()}",
-                    f"{st} client{'s' if st != 1 else ''}", kind="flow"))
+                    f"{st} client{'s' if st != 1 else ''}", kind="flow",
+                    actions=[{"label": "⟳ Reconnect stream", "kind": "reload"}]))
     try:
-        op = aiop_mod.status()
-        P.append(_panel("operator", "AI OPERATOR", "run" if op.get("running") else "idle", op.get("running"),
-                        op.get("activeModel", "-"), "engaged" if op.get("running") else "off"))
+        op = aiop_mod.status(); running = op.get("running")
+        op_actions = ([{"label": "⏹ Kill operator", "kind": "post", "url": "/api/operator/stop"},
+                       {"label": "⚡ Think once now", "kind": "post", "url": "/api/operator/tick"}]
+                      if running else
+                      [{"label": "▶ Engage — full auto", "kind": "post", "url": "/api/operator/start"}])
+        op_actions.append({"label": "Open AI Operator tab", "kind": "tab", "tab": "operator"})
+        P.append(_panel("operator", "AI OPERATOR", "run" if running else "idle", running,
+                        op.get("activeModel", "-"), "engaged" if running else "off", actions=op_actions))
     except Exception:
         pass
     rh = runner_health(); rs = rh.get("state")
     P.append(_panel("runner", "MISSION RUNNER", {"polling": "run", "hung": "warn", "down": "idle"}.get(rs, "idle"),
-                    rs == "polling", rh.get("detail", ""), rs))
+                    rs == "polling", rh.get("detail", ""), rs,
+                    actions=[{"label": "▶ Start / Restart", "kind": "post", "url": "/api/runner", "body": {"action": "restart"}},
+                             {"label": "⏹ Stop", "kind": "post", "url": "/api/runner", "body": {"action": "stop"}}]))
     # services (ollama/n8n/crawl4ai) — network probes, cached ~15s so panels stay cheap on every tick
     if now - _panels_cache["t"] > 15 or not _panels_cache["svc"]:
         try: _panels_cache["svc"] = services()
         except Exception: _panels_cache["svc"] = []
         _panels_cache["t"] = now
+    _svc_actions = {
+        "ollama": [{"label": "▶ Start Ollama", "kind": "post", "url": "/api/provider/login", "body": {"provider": "ollama"}},
+                   {"label": "Open Abliterated tab", "kind": "tab", "tab": "ablit"}],
+        "n8n": [{"label": "Open n8n ↗", "kind": "open", "url": "http://localhost:5678"}],
+        "crawl4ai": [{"label": "Open crawl4ai ↗", "kind": "open", "url": "http://localhost:11235"}],
+    }
     for s in (_panels_cache["svc"] or []):
         nm, up = s.get("name", "?"), s.get("up"); loaded = s.get("loaded") or []
         P.append(_panel(nm, nm.upper(), "run" if up else "down",
                         up and (nm != "ollama" or bool(loaded)),
                         (", ".join(loaded) if nm == "ollama" and loaded else ("reachable" if up else "unreachable")),
-                        "up" if up else "down"))
+                        "up" if up else "down", actions=_svc_actions.get(nm, [])))
     try:
         avail = llm_mod.available(); keyed = [p for p, v in llm_mod.status_all().items() if v.get("keySet")]
         lvl = round(100 * len(avail) / len(keyed)) if keyed else 0
         P.append(_panel("providers", "CLOUD PROVIDERS", "run" if avail else ("warn" if keyed else "idle"),
                         bool(avail), ("ready: " + ", ".join(avail[:4])) if avail else "no provider live",
-                        f"{len(avail)}/{len(keyed)}", level=lvl, kind="gauge"))
+                        f"{len(avail)}/{len(keyed)}", level=lvl, kind="gauge",
+                        actions=[{"label": "Manage providers & keys", "kind": "tab", "tab": "analytics"}]))
     except Exception:
         pass
     try:
         gov = budget_mod.governor(summary()); sev = gov.get("severity", "ok")
         used = round((gov.get("today") or {}).get("pct", 0))
         P.append(_panel("budget", "TOKEN BUDGET", {"ok": "run", "warn": "warn", "critical": "down"}.get(sev, "run"),
-                        True, f"severity: {sev}", f"{used}% today", level=used, kind="gauge"))
+                        True, f"severity: {sev}", f"{used}% today", level=used, kind="gauge",
+                        actions=[{"label": "Open budget & governor", "kind": "tab", "tab": "analytics"}]))
     except Exception:
         pass
     # guardian — read the EXTERNAL heartbeat (loose coupling: never imports guardian)
+    _g_snap = {"label": "📸 Snapshot now", "kind": "post", "url": "/api/guardian", "body": {"action": "snapshot"}}
+    _g_arm = {"label": "🛟 Arm watchdog", "kind": "post", "url": "/api/guardian", "body": {"action": "arm"}}
     try:
         hbp = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "helm-guardian", "heartbeat.json")
         hb = json.loads(open(hbp, encoding="utf-8").read())
@@ -423,9 +445,11 @@ def health_panels():
         age = hb.get("lastSnapshotAgeSec")
         P.append(_panel("guardian", "GUARDIAN", "run" if watching else "warn", watching,
                         (f"last snapshot {age}s ago" if age is not None else "no snapshot yet"),
-                        "watching" if watching else "armed", kind="gear"))
+                        "watching" if watching else "armed", kind="gear",
+                        actions=([_g_snap] if watching else [_g_arm, _g_snap])))
     except Exception:
-        P.append(_panel("guardian", "GUARDIAN", "idle", False, "run GUARDIAN.bat to arm the watchdog", "off"))
+        P.append(_panel("guardian", "GUARDIAN", "idle", False, "click to arm the watchdog", "off",
+                        actions=[_g_arm, _g_snap]))
     return {"panels": P, "ts": int(now * 1000)}
 
 # ---------------- real work (git commits across venture repos) ----------------
@@ -877,7 +901,20 @@ class H(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _fail(self, e):
+        # error boundary: a raising handler returns a clean JSON 500, never a silent empty reply
+        try:
+            self._json({"error": f"{type(e).__name__}: {e}"[:300], "endpoint": self.path}, 500)
+        except Exception:
+            pass
+
     def do_GET(self):
+        try:
+            self._get()
+        except Exception as e:
+            self._fail(e)
+
+    def _get(self):
         p = self.path.split("?")[0]
         if p == "/api/events":
             # SSE live-push: one long-lived stream per client. Emits "tick" the instant any state write
@@ -982,11 +1019,13 @@ class H(BaseHTTPRequestHandler):
             sid = parse_qs(urlparse(self.path).query).get("id", [""])[0]
             return self._json(bridge_mod.session_workflow(sid))
         if p == "/api/bridge/pull":
-            # HELM -> here: the open work a Claude session can pick up and continue
+            # GlassPanel -> here: the open work a Claude session can pick up and continue.
+            # NOTE: this list must NOT be named `work` — that shadows the module-level work() function
+            # across the whole do_GET scope and breaks /api/work (UnboundLocalError). (mythos audit fix)
             s = load_state()
-            work = [{"id": t.get("id"), "text": t.get("text"), "v": t.get("v"), "status": t.get("status", "")}
-                    for t in s.get("tasks", []) if t.get("mission") and t.get("col") == "backlog"]
-            return self._json({"work": work, "count": len(work),
+            openwork = [{"id": t.get("id"), "text": t.get("text"), "v": t.get("v"), "status": t.get("status", "")}
+                        for t in s.get("tasks", []) if t.get("mission") and t.get("col") == "backlog"]
+            return self._json({"work": openwork, "count": len(openwork),
                                "howto": "Act on these in a Claude session; POST results to /api/bridge/push or /api/job."})
         if p == "/api/config":
             return self._json(load_config())
@@ -1052,6 +1091,12 @@ class H(BaseHTTPRequestHandler):
             self._json({"error": "not found"}, 404)
 
     def do_POST(self):
+        try:
+            self._post()
+        except Exception as e:
+            self._fail(e)
+
+    def _post(self):
         path0 = self.path.split("?")[0]
         if path0 == "/api/launch":
             # day-start tiers, WHITELISTED profiles only (never arbitrary commands)
@@ -1456,6 +1501,21 @@ class H(BaseHTTPRequestHandler):
                     f.write("echo.\r\necho Done. Close this window; the model now shows in HELM's Abliterated tab.\r\npause\r\n")
                 os.startfile(bat)
                 return self._json({"ok": True, "msg": f"pulling {model} in a terminal - watch its progress there, then it appears as 'pulled'."})
+            except Exception as e:
+                return self._json({"ok": False, "error": str(e)}, 400)
+        if path0 == "/api/guardian":
+            # Machine Room control for the external watchdog: arm it (launch GUARDIAN.bat) or snapshot now.
+            n = int(self.headers.get("Content-Length", 0))
+            try:
+                act = (json.loads(self.rfile.read(n)) if n else {}).get("action", "").lower()
+                if act == "arm":
+                    os.startfile(os.path.join(_CFG_DIR, "GUARDIAN.bat"))
+                    return self._json({"ok": True, "msg": "Guardian watchdog launching — the panel flips to 'watching' shortly."})
+                if act == "snapshot":
+                    import guardian as _g
+                    p = _g.snapshot("manual-ui")
+                    return self._json({"ok": True, "msg": "snapshot saved: " + os.path.basename(p)})
+                return self._json({"ok": False, "error": "action must be arm|snapshot"}, 400)
             except Exception as e:
                 return self._json({"ok": False, "error": str(e)}, 400)
         if path0 in ("/api/bridge/capture", "/api/bridge/push"):

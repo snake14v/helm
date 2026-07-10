@@ -500,10 +500,24 @@
   .gfill{position:absolute;left:0;right:0;bottom:0;background:linear-gradient(#5fd0ff,#2b7fff);transition:height .6s ease}
   .gfill.warn{background:linear-gradient(#ffd66b,#e3b341)} .gfill.crit{background:linear-gradient(#ff8a5f,#f85149)}
   .gfill::after{content:"";position:absolute;top:0;left:0;right:0;height:3px;background:rgba(255,255,255,.35)}
+  .glass[data-pid]{transition:transform .12s ease,border-color .12s ease}
+  .glass[data-pid]:hover{transform:translateY(-2px);border-color:#33405c}
+  .gctl{font:600 .58rem/1 'IBM Plex Mono',monospace;color:#5a6472;letter-spacing:.04em;margin-left:5px}
   </style>
-  <h2 style="margin-top:6px">🏭 Machine Room <span class="sub">— a glass panel per subsystem; if it's spinning, that part is working. Oil-level gauges show budget &amp; providers.</span></h2>
+  <h2 style="margin-top:6px">🏭 Machine Room <span class="sub">— a glass panel per subsystem; if it's spinning, that part is working. <b>Click any panel to control it.</b></span></h2>
   <div class="glasswrap" id="panels"><span style="color:var(--dim)">reading the machine…</span></div>
 </section>
+
+<!-- click-a-panel control popover -->
+<div id="panelCtl" style="display:none;position:fixed;inset:0;z-index:36;background:rgba(5,7,10,.72);backdrop-filter:blur(3px);align-items:center;justify-content:center">
+  <div style="width:340px;max-width:92vw;background:linear-gradient(160deg,#111725,#0a0d14);border:1px solid #2a3346;border-radius:15px;padding:16px 18px;box-shadow:0 16px 50px rgba(0,0,0,.6)">
+    <div style="display:flex;align-items:center;gap:9px;margin-bottom:10px">
+      <b id="pcTitle" style="flex:1;font:700 .82rem/1 'IBM Plex Mono',monospace;letter-spacing:.1em;color:var(--ink)">PANEL</b>
+      <button id="pcClose" style="border:1px solid var(--line);background:var(--panel2);color:var(--dim);border-radius:7px;padding:2px 10px;cursor:pointer">close</button>
+    </div>
+    <div id="pcBody"></div>
+  </div>
+</div>
 
 <!-- ============ BRIDGE — transfer workflows between Claude Code/Desktop and HELM ============ -->
 <section data-tab="bridge">
@@ -1760,24 +1774,53 @@ $('ablitSend').onclick=async()=>{
 };
 
 /* ===== MACHINE ROOM — factory glass panels (is every part spinning?) ===== */
+let PANELS={};
 async function pollPanels(){
   try{
     const d=await (await fetch('/api/health/panels')).json();
+    PANELS={};
     $('panels').innerHTML=(d.panels||[]).map(p=>{
+      PANELS[p.id]={label:p.label, actions:p.actions||[]};
       const gauge=(p.kind==='gauge' && p.level!=null);
       const pad=gauge?'padding-left:42px':'';
+      const nact=(p.actions||[]).length;
       const deco=gauge
         ? `<div class="gtube"><div class="gfill ${p.level>=90?'crit':(p.level>=75?'warn':'')}" style="height:${Math.max(3,Math.min(100,p.level))}%"></div></div>`
         : `<div class="ggear ${p.spin?'spin':''}">${p.kind==='flow'?'◉':'⚙'}</div>`;
-      return `<div class="glass ${esc(p.state)}" title="${esc(p.detail||'')}">
+      return `<div class="glass ${esc(p.state)}" data-pid="${esc(p.id)}" title="${nact?'click to control · ':''}${esc(p.detail||'')}" style="${nact?'cursor:pointer':''}">
         <span class="gled"></span>
-        <div class="glabel">${esc(p.label)}</div>
+        <div class="glabel">${esc(p.label)}${nact?`<span class="gctl">⚙ ${nact}</span>`:''}</div>
         <div class="gmetric" style="${pad}">${esc(p.metric||'—')}</div>
         <div class="gdetail" style="${pad}">${esc(p.detail||'')}</div>
         ${deco}</div>`;
     }).join('')||'<span style="color:var(--dim)">no panels</span>';
+    $('panels').querySelectorAll('.glass[data-pid]').forEach(el=>{
+      if((PANELS[el.dataset.pid]?.actions||[]).length) el.onclick=()=>openPanelCtl(el.dataset.pid);
+    });
   }catch(e){ $('panels').innerHTML='<span style="color:var(--dim)">machine unreachable</span>'; }
 }
+function openPanelCtl(pid){
+  const p=PANELS[pid]; if(!p||!(p.actions||[]).length) return;
+  $('pcTitle').textContent=p.label;
+  $('pcBody').innerHTML=p.actions.map((a,i)=>`<button class="pcAct" data-i="${i}" style="display:block;width:100%;text-align:left;margin:6px 0;padding:10px 13px;border:1px solid var(--line);background:var(--panel2);color:var(--ink);border-radius:9px;cursor:pointer;font-size:.86rem">${esc(a.label)}</button>`).join('');
+  $('pcBody').querySelectorAll('.pcAct').forEach(b=>b.onclick=()=>runPanelAct(p.actions[+b.dataset.i]));
+  $('panelCtl').style.display='flex';
+}
+async function runPanelAct(a){
+  $('panelCtl').style.display='none';
+  if(!a) return;
+  if(a.kind==='reload'){ location.reload(); return; }
+  if(a.kind==='open'){ window.open(a.url,'_blank','noopener'); return; }
+  if(a.kind==='tab'){ document.querySelector(`#tabs button[data-t="${a.tab}"]`)?.click(); return; }
+  if(a.kind==='post'){
+    try{ const r=await (await fetch(a.url,{method:'POST',body:JSON.stringify(a.body||{})})).json();
+      toast(r.ok!==false?('✓ '+(r.msg||'done')):('✗ '+((r.error||'failed')+'').slice(0,60))); }
+    catch(e){ toast('✗ request failed'); }
+    setTimeout(pollPanels,800);
+  }
+}
+document.getElementById('pcClose').onclick=()=>$('panelCtl').style.display='none';
+document.getElementById('panelCtl').addEventListener('click',e=>{ if(e.target.id==='panelCtl')$('panelCtl').style.display='none'; });
 /* ===== BRIDGE — transfer workflows between Claude sessions and HELM ===== */
 function agoStr(sec){ return sec<60?sec+'s':sec<3600?Math.round(sec/60)+'m':sec<86400?Math.round(sec/3600)+'h':Math.round(sec/86400)+'d'; }
 async function pollBridge(){

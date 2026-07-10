@@ -56,31 +56,39 @@ def pick_provider(cls):
     return {"mode": "cloud", "provider": best}
 
 
-def run(task, context="", max_tokens=1500):
-    """Route ONE task to the picked provider and return {class, provider, ok, text, ms}."""
-    cls = classify_task(task)
+def _dispatch(cls, prompt, max_tokens=1500):
+    """Send an ALREADY-CLASSIFIED prompt to the picked provider — no re-classification. This is what
+    lets the agentic decomposition force cls='reason' and never recurse into the classifier (which used
+    to infinite-loop: a 'break this coding task…' prompt re-classifies as 'agentic' → RecursionError)."""
     pick = pick_provider(cls)
-    prompt = f"{context}\n\n=== YOUR TASK ===\n{task}" if context else task
     if pick["mode"] == "local":
         m = ablit.pick_model()
         r = ablit.chat(m, prompt, timeout=120)
         return {"class": cls, "provider": f"gemma:{m}", "mode": "local",
                 "ok": r.get("ok"), "text": r.get("text"), "ms": r.get("ms")}
-    if pick["mode"] == "agentic":
-        # Advisory return here is a PLAN + the exact failover command to actually edit files (Codex-first,
-        # Claude skipped). Real file edits run out-of-band through the already-verified chain, not inline.
-        cmd = f'agent-failover.ps1 -SkipClaude -Cwd "<repo>" -Mission "router" -Prompt "{task[:80]}..."'
-        plan = run(f"Break this coding task into an ordered checklist a coding agent can execute:\n{task}",
-                   context)  # cheap model drafts the checklist
-        return {"class": "agentic", "provider": "codex (via failover)", "mode": "agentic",
-                "ok": True, "text": (plan.get("text") or ""), "handoff": cmd,
-                "note": "file-editing task — run the handoff command to execute via Codex."}
     if pick["mode"] == "none":
-        return {"class": cls, "provider": None, "ok": False,
-                "text": None, "error": "no provider available (no cloud key + Ollama down)"}
+        return {"class": cls, "provider": None, "ok": False, "text": None,
+                "error": "no provider available (no cloud key + Ollama down)"}
     r = llm.call(pick["provider"], prompt, max_tokens=max_tokens, timeout=90)
     return {"class": cls, "provider": pick["provider"], "mode": "cloud",
             "ok": r.get("ok"), "text": r.get("text"), "ms": r.get("ms"), "error": r.get("error")}
+
+
+def run(task, context="", max_tokens=1500):
+    """Route ONE task to the cheapest capable provider and return {class, provider, ok, text, ms}."""
+    cls = classify_task(task)
+    prompt = f"{context}\n\n=== YOUR TASK ===\n{task}" if context else task
+    if cls == "agentic":
+        # file-editing task: draft a checklist on a REASONING provider (via _dispatch, NOT run() — so the
+        # decomposition can't re-classify as 'agentic' and recurse) + hand real edits to the failover chain.
+        cmd = f'agent-failover.ps1 -SkipClaude -Cwd "<repo>" -Mission "router" -Prompt "{task[:80]}..."'
+        plan = _dispatch("reason", (f"{context}\n\n" if context else "")
+                         + f"Break this coding task into an ordered checklist a coding agent can execute:\n{task}",
+                         max_tokens)
+        return {"class": "agentic", "provider": "codex (via failover)", "mode": "agentic",
+                "ok": True, "text": (plan.get("text") or ""), "handoff": cmd,
+                "note": "file-editing task — run the handoff command to execute via Codex."}
+    return _dispatch(cls, prompt, max_tokens)
 
 
 # ---- context carriers: the "code wiki + git + what's left" the baton carries ----
