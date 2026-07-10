@@ -52,3 +52,7 @@ bridge/
 
 # Serena MCP project config (tool cruft, per-machine)
 .serena/
+build/
+dist/
+*.spec
+GlassPanel.spec
