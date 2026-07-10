@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>HELM · Mission Control</title>
+<title>GlassPanel</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
   :root{
@@ -140,7 +140,7 @@
 </head>
 <body>
 <header>
-  <h1 title="your agent company, one deck">⎈ HELM <span>&middot; mission control &middot; live</span></h1>
+  <h1 title="your agent company, one deck">🔲 GlassPanel <span>&middot; mission control &middot; live</span></h1>
   <nav id="tabs">
     <button data-t="overview" class="act">🏛 Overview</button>
     <button data-t="agents">🤖 Agents</button>
@@ -150,6 +150,8 @@
     <button data-t="analytics">📊 Analytics</button>
     <button data-t="ablit">🔓 Abliterated</button>
     <button data-t="operator">🧠 AI Operator</button>
+    <button data-t="machine">🏭 Machine</button>
+    <button data-t="bridge">🔗 Bridge</button>
   </nav>
   <button id="pageRefresh" title="Refresh THIS tab's data — no full browser reload" style="border-color:#2a5599;color:#7fb0ff;font-weight:700;font-size:1rem;padding:5px 11px">↻</button>
   <button id="helmUpdate" title="Update HELM from GitHub" style="border-color:#a371f755;color:#c9b6ff">⬆ update</button>
@@ -474,6 +476,56 @@
   </div>
 </section>
 
+<!-- ============ MACHINE ROOM — factory glass panels ============ -->
+<section data-tab="machine">
+  <style>
+  .glasswrap{display:grid;grid-template-columns:repeat(auto-fill,minmax(212px,1fr));gap:14px;margin-top:4px}
+  .glass{position:relative;min-height:104px;background:linear-gradient(160deg,#111725,#0a0d14);border:1px solid #1b2130;
+    border-radius:14px;padding:13px 15px 14px;overflow:hidden;box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 6px 18px rgba(0,0,0,.42)}
+  .glass::before{content:"";position:absolute;top:-45%;left:-25%;width:95%;height:85%;
+    background:radial-gradient(ellipse at center,rgba(255,255,255,.07),transparent 68%);pointer-events:none}
+  .gled{position:absolute;top:14px;right:14px;width:9px;height:9px;border-radius:50%;background:#3a4150}
+  .glass.run .gled{background:#3ddc84;box-shadow:0 0 9px #3ddc84;animation:gpulse 1.7s infinite}
+  .glass.warn .gled{background:#e3b341;box-shadow:0 0 9px #e3b341}
+  .glass.down .gled{background:#f85149;box-shadow:0 0 9px #f85149;animation:gpulse .8s infinite}
+  @keyframes gpulse{0%,100%{opacity:1}50%{opacity:.32}}
+  .glabel{font:600 .62rem/1 'IBM Plex Mono',ui-monospace,monospace;letter-spacing:.13em;color:#6b7688;text-transform:uppercase}
+  .gmetric{font:700 1.12rem/1.1 'Space Grotesk',sans-serif;color:#e8ecf1;margin-top:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .gdetail{font-size:.67rem;color:#58606e;margin-top:5px;line-height:1.35;min-height:1.7em}
+  .ggear{position:absolute;bottom:9px;right:12px;font-size:25px;color:#232c3d;line-height:1;user-select:none}
+  .glass.run .ggear.spin{color:#3d5f92;animation:gspin 3s linear infinite}
+  .glass.warn .ggear.spin{color:#7a5a20;animation:gspin 7s linear infinite}
+  @keyframes gspin{to{transform:rotate(360deg)}}
+  .gtube{position:absolute;left:14px;bottom:12px;width:32px;height:46px;border:1px solid #232b3a;border-radius:5px;background:#070a10;overflow:hidden}
+  .gfill{position:absolute;left:0;right:0;bottom:0;background:linear-gradient(#5fd0ff,#2b7fff);transition:height .6s ease}
+  .gfill.warn{background:linear-gradient(#ffd66b,#e3b341)} .gfill.crit{background:linear-gradient(#ff8a5f,#f85149)}
+  .gfill::after{content:"";position:absolute;top:0;left:0;right:0;height:3px;background:rgba(255,255,255,.35)}
+  </style>
+  <h2 style="margin-top:6px">🏭 Machine Room <span class="sub">— a glass panel per subsystem; if it's spinning, that part is working. Oil-level gauges show budget &amp; providers.</span></h2>
+  <div class="glasswrap" id="panels"><span style="color:var(--dim)">reading the machine…</span></div>
+</section>
+
+<!-- ============ BRIDGE — transfer workflows between Claude Code/Desktop and HELM ============ -->
+<section data-tab="bridge">
+  <h2 style="margin-top:6px">🔗 Bridge <span class="sub">— index the workflows you run in Claude Code/Desktop, and transfer them into HELM (and back)</span></h2>
+  <div class="panel" style="border-color:#2a5599;margin-bottom:12px;font-size:.82rem;color:var(--ink)">
+    The <b>full-permissions transfer slot</b>: every Claude session on this PC is indexed below. <b>→ Capture to GlassPanel</b>
+    extracts what a session actually did (its intents, files, tools) into a portable spec + a mission the operator/runner
+    can continue. A Claude session pushes work straight in with:
+    <code style="display:block;background:#080a0f;padding:7px 10px;border-radius:6px;margin-top:7px;font-size:.74rem;white-space:pre-wrap">curl -s localhost:8799/api/bridge/push -H "Content-Type: application/json" -d '{"title":"...","text":"what HELM should do","intents":["step 1","step 2"],"venture":"orbean"}'</code>
+    Loopback-only (127.0.0.1) — the boundary is your machine.
+  </div>
+
+  <h2>Workflows happening here <span class="sub">— Claude Code/Desktop sessions, newest first · 🟢 = active now</span></h2>
+  <div class="panel" style="overflow-x:auto;margin-bottom:12px">
+    <table><thead><tr><th></th><th>session / title</th><th>project</th><th>size</th><th>seen</th><th></th></tr></thead>
+    <tbody id="bridgeSessions"><tr><td colspan="6" style="color:var(--dim)">indexing…</td></tr></tbody></table>
+  </div>
+
+  <h2>GlassPanel → here <span class="sub">— open work a Claude session can pull and continue (<code style="background:#080a0f;padding:1px 5px;border-radius:4px">GET /api/bridge/pull</code>)</span></h2>
+  <div class="panel" id="bridgePull">—</div>
+</section>
+
 </main>
 <div class="toast" id="toast">ok</div>
 <!-- card detail: click any card -> where the work lives + what to do -->
@@ -551,6 +603,8 @@ document.querySelectorAll('#tabs button').forEach(b=>b.onclick=()=>{
   if(b.dataset.t==='analytics'){ renderChart(); pollGov(); pollProviders(false); pollModels(); }
   if(b.dataset.t==='ablit'){ pollAblit(); }
   if(b.dataset.t==='operator'){ pollOperator(); }
+  if(b.dataset.t==='machine'){ pollPanels(); }
+  if(b.dataset.t==='bridge'){ pollBridge(); }
 });
 /* in-page refresh: re-fetch the ACTIVE tab's data without a full browser reload */
 function refreshTab(){
@@ -1705,17 +1759,80 @@ $('ablitSend').onclick=async()=>{
   $('ablitSend').disabled=false; ABLIT_IMG=null; $('ablitImgName').textContent='';
 };
 
-/* boot */
+/* ===== MACHINE ROOM — factory glass panels (is every part spinning?) ===== */
+async function pollPanels(){
+  try{
+    const d=await (await fetch('/api/health/panels')).json();
+    $('panels').innerHTML=(d.panels||[]).map(p=>{
+      const gauge=(p.kind==='gauge' && p.level!=null);
+      const pad=gauge?'padding-left:42px':'';
+      const deco=gauge
+        ? `<div class="gtube"><div class="gfill ${p.level>=90?'crit':(p.level>=75?'warn':'')}" style="height:${Math.max(3,Math.min(100,p.level))}%"></div></div>`
+        : `<div class="ggear ${p.spin?'spin':''}">${p.kind==='flow'?'◉':'⚙'}</div>`;
+      return `<div class="glass ${esc(p.state)}" title="${esc(p.detail||'')}">
+        <span class="gled"></span>
+        <div class="glabel">${esc(p.label)}</div>
+        <div class="gmetric" style="${pad}">${esc(p.metric||'—')}</div>
+        <div class="gdetail" style="${pad}">${esc(p.detail||'')}</div>
+        ${deco}</div>`;
+    }).join('')||'<span style="color:var(--dim)">no panels</span>';
+  }catch(e){ $('panels').innerHTML='<span style="color:var(--dim)">machine unreachable</span>'; }
+}
+/* ===== BRIDGE — transfer workflows between Claude sessions and HELM ===== */
+function agoStr(sec){ return sec<60?sec+'s':sec<3600?Math.round(sec/60)+'m':sec<86400?Math.round(sec/3600)+'h':Math.round(sec/86400)+'d'; }
+async function pollBridge(){
+  try{
+    const [ss,pw]=await Promise.all([
+      fetch('/api/bridge/sessions').then(r=>r.json()),
+      fetch('/api/bridge/pull').then(r=>r.json())
+    ]);
+    $('bridgeSessions').innerHTML=(ss.sessions||[]).map(s=>`<tr>
+      <td>${s.active?'🟢':'<span style="color:var(--dim)">○</span>'}</td>
+      <td style="max-width:360px"><b style="font-size:.82rem">${esc(s.title)}</b><br><span style="color:var(--dim);font-size:.68rem">${esc(s.id)}</span></td>
+      <td style="font-size:.76rem">${esc(s.project)}</td>
+      <td style="font-size:.74rem;color:var(--dim)">${s.sizeMB}MB</td>
+      <td style="font-size:.74rem;color:var(--dim)">${agoStr(s.ageSec)}</td>
+      <td><button class="bcap" data-id="${esc(s.id)}" style="border-color:#2a5599;color:#58a6ff;font-size:.72rem;white-space:nowrap">→ Capture to GlassPanel</button></td>
+    </tr>`).join('')||'<tr><td colspan="6" style="color:var(--dim)">no recent sessions</td></tr>';
+    $('bridgeSessions').querySelectorAll('.bcap').forEach(b=>b.onclick=async()=>{
+      b.disabled=true; b.textContent='capturing…';
+      try{ const r=await (await fetch('/api/bridge/capture',{method:'POST',body:JSON.stringify({id:b.dataset.id})})).json();
+        toast(r.ok?('🔗 captured → mission '+((r.mission||{}).id||'')):'capture failed'); }
+      catch(e){ toast('capture failed'); }
+      b.disabled=false; b.textContent='→ Capture to GlassPanel'; setTimeout(pollBridge,600);
+    });
+    $('bridgePull').innerHTML=(pw.work&&pw.work.length)
+      ? '<div style="font-size:.72rem;color:var(--dim);margin-bottom:6px">'+pw.count+' open item(s) — a Claude session can pull these:</div>'+
+        pw.work.map(w=>`<div style="padding:6px 0;border-bottom:1px solid var(--line);font-size:.82rem">🎯 ${esc(w.text||'')} <span style="color:var(--dim);font-size:.7rem">${w.v?('· '+esc(w.v)):''} ${w.status?('· '+esc(w.status)):''}</span></div>`).join('')
+      : '<span style="color:var(--dim)">no open work — capture a session above to create some</span>';
+  }catch(e){ $('bridgeSessions').innerHTML='<tr><td colspan="6" style="color:var(--dim)">bridge unreachable</td></tr>'; }
+}
+/* boot — SSE live-push replaces the old ~15 polling loops.
+   HOT = things HELM writes itself (board/runner/operator/approvals) -> refreshed on every /api/events
+   tick. SLOW = the outside world (git, docker services, provider health, usage) that a HELM write
+   can't observe -> a single 30s poll. Idle req/min collapses from ~130 to ~0 + one open connection. */
+const USE_SSE = true;   // reversibility: set false to fall back to plain polling for one release
 (async()=>{
   await loadConfig(); await loadState(); renderBoard();
-  pollSummary(); pollRuns(); pollSvc(); pollWork(); pollHeat(); pollFeed(); pollNba();
-  setInterval(pollSummary,10000); setInterval(pollRuns,6000); setInterval(pollSvc,15000);
-  setInterval(pollWork,30000); setInterval(pollHeat,60000); setInterval(pollFeed,4000); setInterval(pollNba,20000); setInterval(pollState,3000);
-  pollApprovals(); setInterval(pollApprovals,4000); pollTerminals(); setInterval(pollTerminals,8000);
-  pollStuck(); setInterval(pollStuck,8000); pollFlight(); setInterval(pollFlight,6000);
-  pollGov(); setInterval(pollGov,15000); pollProviders(false); setInterval(()=>pollProviders(false),90000);
-  pollMode(); setInterval(pollMode,12000);
-  pollVersion();
+  const HOT  = [pollState, pollFeed, pollApprovals, pollRuns, pollFlight, pollStuck, pollMode, pollNba];
+  const SLOW = [pollSummary, pollSvc, pollWork, pollHeat, ()=>pollProviders(false), pollVersion, pollTerminals];
+  const active = ()=>document.querySelector('#tabs button.act')?.dataset.t;
+  const runHot = ()=>{ HOT.forEach(f=>{try{f()}catch(e){}});
+    if(active()==='operator'){try{pollOperator()}catch(e){}} if(active()==='analytics'){try{pollGov()}catch(e){}}
+    if(active()==='machine'){try{pollPanels()}catch(e){}} if(active()==='bridge'){try{pollBridge()}catch(e){}} };
+  const runSlow = ()=>SLOW.forEach(f=>{try{f()}catch(e){}});
+  runHot(); runSlow(); setInterval(runSlow, 30000);          // external telemetry: slow poll (was 6-90s each)
+
+  if(!USE_SSE){ setInterval(runHot, 4000); return; }         // old-world fallback
+  let hotT=null, fallback=null;
+  const scheduleHot=()=>{ if(hotT)return; hotT=setTimeout(()=>{hotT=null;runHot();},250); };  // coalesce write-bursts
+  const startFallback=()=>{ if(!fallback) fallback=setInterval(runHot,5000); };               // only while SSE is down
+  const stopFallback =()=>{ if(fallback){clearInterval(fallback);fallback=null;} };
+  (function connect(){
+    let es; try{ es=new EventSource('/api/events'); }catch(e){ return startFallback(); }
+    es.addEventListener('tick', ()=>{ stopFallback(); scheduleHot(); });   // a HELM state write happened -> refresh
+    es.onerror=()=>{ try{es.close()}catch(e){}; startFallback(); setTimeout(connect, 5000); };  // reconnect w/ poll bridge
+  })();
 })();
 /* ===== AI OPERATOR — a local uncensored LLM drives HELM on full auto ===== */
 let opBooted=false;
@@ -1815,7 +1932,7 @@ setInterval(()=>{ if(document.querySelector('#tabs button.act')?.dataset.t==='op
 
 <!-- ============ HELM RADIO (mood radio → plays in YOUR YouTube Premium) ============ -->
 <div id="musicWidget" style="position:fixed;right:16px;bottom:16px;z-index:40">
-  <button id="mwToggle" style="display:flex;align-items:center;gap:7px;background:linear-gradient(135deg,#1f6feb,#a371f7);border:none;color:#fff;font-weight:600;padding:9px 14px;border-radius:22px;box-shadow:0 6px 20px rgba(0,0,0,.45);cursor:pointer;font-size:.82rem">🎵 <span id="mwNow" style="max-width:190px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">HELM Radio</span></button>
+  <button id="mwToggle" style="display:flex;align-items:center;gap:7px;background:linear-gradient(135deg,#1f6feb,#a371f7);border:none;color:#fff;font-weight:600;padding:9px 14px;border-radius:22px;box-shadow:0 6px 20px rgba(0,0,0,.45);cursor:pointer;font-size:.82rem">🎵 <span id="mwNow" style="max-width:190px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">GlassPanel Radio</span></button>
   <div id="mwPanel" style="display:none;width:330px;background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:hidden;box-shadow:0 14px 46px rgba(0,0,0,.6)">
     <div style="display:flex;align-items:center;gap:8px;padding:9px 12px;border-bottom:1px solid var(--line)">
       <b style="font-size:.86rem">🎵 HELM Radio</b>

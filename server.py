@@ -17,6 +17,9 @@ import apihealth as apihealth_mod
 import ablit as ablit_mod
 import aiop as aiop_mod
 import model_rank as model_rank_mod
+import router as router_mod
+import events as events_mod
+import bridge as bridge_mod
 from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -361,6 +364,70 @@ def mood():
     return {"mood": m, "reason": why,
             "signals": {"severity": sev, "runningMissions": nrun, "stuckHigh": stuck, "hour": hr}}
 
+
+def _panel(pid, label, state, spin, detail="", metric="", level=None, kind="gear"):
+    # state: run(green,working) | idle(dim,ok-but-quiet) | warn(amber) | down(red). spin: is it turning?
+    return {"id": pid, "label": label, "state": state, "spin": bool(spin), "detail": detail[:60],
+            "metric": metric, "level": level, "kind": kind}
+
+_panels_cache = {"t": 0, "svc": None}
+
+def health_panels():
+    """Factory-style 'glass panels' — one per subsystem, showing if it's SPINNING (working) at a glance."""
+    now = time.time()
+    P = []
+    P.append(_panel("server", "SERVER", "run", True, "stdlib http.server :8799", "online"))
+    st = events_mod.streams()
+    P.append(_panel("sse", "LIVE PUSH", "run" if st else "idle", st, f"SSE stream v{events_mod.version()}",
+                    f"{st} client{'s' if st != 1 else ''}", kind="flow"))
+    try:
+        op = aiop_mod.status()
+        P.append(_panel("operator", "AI OPERATOR", "run" if op.get("running") else "idle", op.get("running"),
+                        op.get("activeModel", "-"), "engaged" if op.get("running") else "off"))
+    except Exception:
+        pass
+    rh = runner_health(); rs = rh.get("state")
+    P.append(_panel("runner", "MISSION RUNNER", {"polling": "run", "hung": "warn", "down": "idle"}.get(rs, "idle"),
+                    rs == "polling", rh.get("detail", ""), rs))
+    # services (ollama/n8n/crawl4ai) — network probes, cached ~15s so panels stay cheap on every tick
+    if now - _panels_cache["t"] > 15 or not _panels_cache["svc"]:
+        try: _panels_cache["svc"] = services()
+        except Exception: _panels_cache["svc"] = []
+        _panels_cache["t"] = now
+    for s in (_panels_cache["svc"] or []):
+        nm, up = s.get("name", "?"), s.get("up"); loaded = s.get("loaded") or []
+        P.append(_panel(nm, nm.upper(), "run" if up else "down",
+                        up and (nm != "ollama" or bool(loaded)),
+                        (", ".join(loaded) if nm == "ollama" and loaded else ("reachable" if up else "unreachable")),
+                        "up" if up else "down"))
+    try:
+        avail = llm_mod.available(); keyed = [p for p, v in llm_mod.status_all().items() if v.get("keySet")]
+        lvl = round(100 * len(avail) / len(keyed)) if keyed else 0
+        P.append(_panel("providers", "CLOUD PROVIDERS", "run" if avail else ("warn" if keyed else "idle"),
+                        bool(avail), ("ready: " + ", ".join(avail[:4])) if avail else "no provider live",
+                        f"{len(avail)}/{len(keyed)}", level=lvl, kind="gauge"))
+    except Exception:
+        pass
+    try:
+        gov = budget_mod.governor(summary()); sev = gov.get("severity", "ok")
+        used = round((gov.get("today") or {}).get("pct", 0))
+        P.append(_panel("budget", "TOKEN BUDGET", {"ok": "run", "warn": "warn", "critical": "down"}.get(sev, "run"),
+                        True, f"severity: {sev}", f"{used}% today", level=used, kind="gauge"))
+    except Exception:
+        pass
+    # guardian — read the EXTERNAL heartbeat (loose coupling: never imports guardian)
+    try:
+        hbp = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "helm-guardian", "heartbeat.json")
+        hb = json.loads(open(hbp, encoding="utf-8").read())
+        watching = (now - hb.get("ts", 0) / 1000) < 90
+        age = hb.get("lastSnapshotAgeSec")
+        P.append(_panel("guardian", "GUARDIAN", "run" if watching else "warn", watching,
+                        (f"last snapshot {age}s ago" if age is not None else "no snapshot yet"),
+                        "watching" if watching else "armed", kind="gear"))
+    except Exception:
+        P.append(_panel("guardian", "GUARDIAN", "idle", False, "run GUARDIAN.bat to arm the watchdog", "off"))
+    return {"panels": P, "ts": int(now * 1000)}
+
 # ---------------- real work (git commits across venture repos) ----------------
 # Ventures/paths are NOT hardcoded - they come from config.json (this machine, git-ignored) so
 # HELM is multi-user. Falls back to config.example.json, then a minimal default. Edit config.json
@@ -563,6 +630,7 @@ def save_state(s):
             try: os.remove(tmp)
             except Exception: pass
             raise
+    events_mod.bump()   # push a live tick to every open /api/events stream (board changed)
 
 # ---------------- AI operator: sense + act (drives HELM programmatically) ----------------
 # build_snapshot = what the operator SENSES each tick; agent_act = the ONE dispatcher every
@@ -811,6 +879,34 @@ class H(BaseHTTPRequestHandler):
 
     def do_GET(self):
         p = self.path.split("?")[0]
+        if p == "/api/events":
+            # SSE live-push: one long-lived stream per client. Emits "tick" the instant any state write
+            # bumps events.version() (board/runtime/operator), else a heartbeat comment every ~20s so
+            # dead connections are detected. Replaces ~15 polling loops with ONE connection.
+            if not events_mod.open_stream():
+                return self._json({"error": "too many streams"}, 503)
+            try:
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.send_header("Cache-Control", "no-cache")
+                self.send_header("Connection", "keep-alive")
+                self.send_header("X-Accel-Buffering", "no")
+                self.end_headers()
+                last = events_mod.version()
+                self.wfile.write(f"event: tick\ndata: {last}\n\n".encode()); self.wfile.flush()
+                while True:
+                    v = events_mod.wait(last, 20)
+                    if v != last:
+                        last = v
+                        self.wfile.write(f"event: tick\ndata: {v}\n\n".encode())
+                    else:
+                        self.wfile.write(b": ping\n\n")   # heartbeat -> detect a dead client
+                    self.wfile.flush()
+            except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError, OSError):
+                pass
+            finally:
+                events_mod.close_stream()
+            return
         if p == "/api/summary":
             threading.Thread(target=_scan, daemon=True).start()  # refresh in background
             return self._json(summary())
@@ -876,6 +972,22 @@ class H(BaseHTTPRequestHandler):
                                "runner": runner_health()})
         if p == "/api/mood":
             return self._json(mood())
+        if p == "/api/health/panels":
+            return self._json(health_panels())
+        if p == "/api/bridge/sessions":
+            # the workflow index: every recent Claude Code/Desktop session, newest first
+            return self._json({"sessions": bridge_mod.index_sessions()})
+        if p == "/api/bridge/session":
+            from urllib.parse import parse_qs, urlparse
+            sid = parse_qs(urlparse(self.path).query).get("id", [""])[0]
+            return self._json(bridge_mod.session_workflow(sid))
+        if p == "/api/bridge/pull":
+            # HELM -> here: the open work a Claude session can pick up and continue
+            s = load_state()
+            work = [{"id": t.get("id"), "text": t.get("text"), "v": t.get("v"), "status": t.get("status", "")}
+                    for t in s.get("tasks", []) if t.get("mission") and t.get("col") == "backlog"]
+            return self._json({"work": work, "count": len(work),
+                               "howto": "Act on these in a Claude session; POST results to /api/bridge/push or /api/job."})
         if p == "/api/config":
             return self._json(load_config())
         if p == "/api/version":
@@ -1344,6 +1456,45 @@ class H(BaseHTTPRequestHandler):
                     f.write("echo.\r\necho Done. Close this window; the model now shows in HELM's Abliterated tab.\r\npause\r\n")
                 os.startfile(bat)
                 return self._json({"ok": True, "msg": f"pulling {model} in a terminal - watch its progress there, then it appears as 'pulled'."})
+            except Exception as e:
+                return self._json({"ok": False, "error": str(e)}, 400)
+        if path0 in ("/api/bridge/capture", "/api/bridge/push"):
+            # THE FULL-PERMISSIONS TRANSFER SLOT (loopback-only). capture = index a Claude session's
+            # workflow into HELM as a spec + mission; push = a Claude session shoves a workflow straight
+            # in. Both create a mission DIRECTLY (no approval gate) — that's what makes it "full perms".
+            n = int(self.headers.get("Content-Length", 0))
+            try:
+                b = json.loads(self.rfile.read(n)) if n else {}
+                if path0.endswith("capture"):
+                    wf = bridge_mod.session_workflow(b.get("id", ""))
+                    if wf.get("error"):
+                        return self._json(wf, 404)
+                else:  # push: build a workflow from the posted payload
+                    ints = b.get("intents") or ([b["text"]] if b.get("text") else [])
+                    wf = {"id": b.get("id") or f"push-{int(time.time())}", "title": b.get("title", "pushed workflow"),
+                          "intents": ints, "intentCount": len(ints), "files": b.get("files", []), "tools": b.get("tools", [])}
+                cap = bridge_mod.capture_doc(wf)
+                res = {"ok": True, "doc": os.path.basename(cap["doc"]), "title": cap["title"]}
+                if b.get("asMission", True):
+                    res["mission"] = agent_act("queue_mission",
+                                               {"text": b.get("text") or cap["mission"], "venture": b.get("venture")},
+                                               actor="bridge")
+                return self._json(res)
+            except Exception as e:
+                return self._json({"ok": False, "error": str(e)}, 400)
+        if path0 in ("/api/route", "/api/relay", "/api/plan"):
+            # Efficiency router: a LOCAL model picks the cheapest capable provider per task (never
+            # defaults to Claude) and relays outputs provider->provider with wiki+git+ledger context.
+            n = int(self.headers.get("Content-Length", 0))
+            try:
+                b = json.loads(self.rfile.read(n)) if n else {}
+                repo = b.get("repo")
+                if path0.endswith("route"):
+                    ctx = (router_mod.wiki_context(repo) + "\n" + router_mod.git_context(repo)).strip()
+                    return self._json(router_mod.run(b.get("task", ""), ctx))
+                if path0.endswith("relay"):
+                    return self._json(router_mod.relay(b.get("goal", ""), b.get("steps", []), repo))
+                return self._json(router_mod.plan_and_relay(b.get("goal", ""), repo))
             except Exception as e:
                 return self._json({"ok": False, "error": str(e)}, 400)
         if path0 == "/api/infer/venture":

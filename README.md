@@ -1,44 +1,106 @@
-# ⎈ HELM — Local Mission Control for AI Coding Agents
+<h1 align="center">🔲 GlassPanel</h1>
 
-> **One dashboard to run, watch, and govern a fleet of AI coding agents** — Claude Code, OpenAI Codex, Google Antigravity, Kimi, and local Ollama models — on your own machine. Kanban board, live token budgets, human-in-the-loop approvals, stuck-task detection, and an unattended mission runner. **Zero cloud. Zero telemetry. One `python server.py`.**
+<p align="center"><b>A Claude-focused AI workflow control plane you run on your own machine.</b></p>
 
-<p align="center"><em>An open-source project by <a href="https://oorulogix.com">Oorulogix</a> — practical AI systems for founders and small teams.</em></p>
+<p align="center">
+One local app to drive a whole fleet of AI agents — <b>Claude Code first</b>, then Codex, cloud free-tiers,
+and local uncensored models — from a single board. It <b>routes each task to the cheapest capable model</b>
+(so Claude isn't the default), <b>relays work between providers</b> with your code + context, shows every
+subsystem behind a <b>factory glass panel</b>, <b>heals and reverts itself</b>, and <b>updates itself from git</b>.
+</p>
 
-![status](https://img.shields.io/badge/status-active-3fb950) ![python](https://img.shields.io/badge/python-stdlib_only-1f6feb) ![license](https://img.shields.io/badge/license-MIT-a371f7) ![platform](https://img.shields.io/badge/platform-Windows-8b949e)
+<p align="center">
+<img src="https://img.shields.io/badge/status-active-3fb950"> <img src="https://img.shields.io/badge/python-stdlib_only-1f6feb"> <img src="https://img.shields.io/badge/deps-none-a371f7"> <img src="https://img.shields.io/badge/telemetry-zero-8b949e"> <img src="https://img.shields.io/badge/license-MIT-e3b341">
+</p>
+
+<p align="center"><em>No framework · no build step · no database · no telemetry · one <code>python server.py</code>.</em><br>
+<em>An open-source project by <a href="https://www.oorulogix.com">Ooru Logix</a>.</em></p>
 
 ---
 
-## Why HELM?
+## Why it exists
 
-If you run **multiple AI coding agents** you already have the problem HELM solves: work scattered across terminals, no idea what's running, tokens burning invisibly, background agents acting without asking, and tasks that silently stall. HELM is the **single pane of glass** that fixes all of it — and it's a ~30 MB Python-stdlib server with a single HTML dashboard, so there's nothing to deploy and nothing phones home.
+You already run AI agents all day. What you *don't* have is one place that **sees them, routes them, and keeps
+them running** — without burning your best (most expensive) model on every trivial task, and without a bad
+automated change quietly bricking your tooling. GlassPanel is that place. It's **Claude-first** (Claude Code is
+the primary executor), but it treats your whole model fleet as one adaptive system.
 
-## Features
+The name comes from the **Machine Room**: like the little sight-glasses on a factory machine that show oil level
+and whether the gears are turning, GlassPanel gives every subsystem its own panel — so you can glance and see
+what's *spinning*.
 
-- **🗂 Agent kanban** — a real board where AI agents move their own cards; colour-coded by venture and by status (queued / in-progress / review / needs-you / blocked / done).
-- **⏸ Human-in-the-loop approvals** — background agents *pause and wait for your click* before running. Approve-all and auto-approve toggle included.
-- **💰 Live token governor** — real token burn parsed from your local transcripts, daily/weekly budgets, pace projection, and emergency token-saving levers (optical context compression, local-model offload).
-- **⚠ Stuck-task detection** — finds missions that silently stalled, explains *why* in plain English, and offers one-click Retry / Done / Remove.
-- **🤖 Multi-provider connector** — one OpenAI-compatible caller for **Kimi K2, DeepSeek, Qwen, Groq, Cerebras, Gemini** plus local **Ollama**. Legitimate free tiers, no multi-accounting.
-- **🩺 Self-diagnostics** — a built-in Doctor that health-checks the whole stack and applies safe fixes.
-- **📜 Full activity logs** — every approval, every mission, every switch-over, with stats and explanations.
-- **📂 Click-through** — click any task to see exactly where the work lives on disk and open that folder.
+## What's inside
+
+| | |
+|---|---|
+| 🏭 **Machine Room** | A glass panel per subsystem (server, live-push, operator, runner, Ollama, providers, services, budget, guardian). Spinning gears = working; oil-level gauges = token budget & provider health. |
+| 🧠 **AI Operator** | A **local, uncensored** model (Ollama) drives GlassPanel unattended — observes state, decides, acts — bounded by a fixed action vocabulary, an audit log, and a one-click kill switch. |
+| 🔀 **Model Router** | Classifies each task locally and sends it to the **cheapest capable** provider — never defaults to Claude. Chains outputs provider→provider carrying your code-wiki + git state + a "what's done / what's left" ledger. |
+| 🔗 **Bridge** | Indexes every Claude Code/Desktop session on the machine, extracts what each one actually *did* (intents, files, tools), and **transfers workflows into GlassPanel — and back out** for a session to continue. |
+| 🛟 **Guardian** | An **external** watchdog (imports zero app code, keeps cold snapshots *outside* the repo). Detects a bricked build and does a **full revert** — even the revert is reversible. The safety net that lets automation touch its own code. |
+| ⚡ **Live push** | Server-Sent Events replace polling: the whole UI runs on **one connection** and updates the instant anything changes — no manual refresh. |
+| ♻️ **Failover chain** | Claude → Codex → cloud free-tier → local Gemma. When your Claude weekly limit is hit, work keeps flowing. |
+| 📊 **Adaptive ranking** | Every model call is scored (success + latency); routing and failover order **re-rank themselves over time**. |
+| 🎯 **Mission board + runner** | A kanban of missions an unattended runner executes headlessly, with a human approval gate. |
+| ⬆️ **Self-update** | One button pulls the latest from GitHub and restarts. |
+
+## Integrations (all optional, all local-first)
+
+- **Agents:** Claude Code (primary), OpenAI Codex, Google Antigravity
+- **Cloud free-tiers:** OpenRouter, Groq, Cerebras, Google AI Studio (Gemini), Moonshot / Kimi, Mistral, SambaNova — add a key, it appears
+- **Local models via Ollama:** any model, including **abliterated / uncensored** GGUFs (one-click pull from a curated list + live HuggingFace search)
+- **Services:** n8n (`:5678`), crawl4ai (`:11235`), Docker health
+- Everything speaks the same OpenAI-compatible surface, so a new provider is one dict entry.
 
 ## Quick start
 
 ```bash
-git clone https://github.com/<your-org>/helm-mission-control
-cd helm-mission-control
-SETUP.bat          # prompts for optional API keys, then launches
-# or just:
-python server.py   # -> http://localhost:8799
+git clone https://github.com/snake14v/helm.git glasspanel
+cd glasspanel
+cp config.example.json config.json        # edit with your project folders
+python server.py                          # → http://localhost:8799
 ```
 
-No dependencies — HELM uses only the Python standard library.
+**As a native desktop window** (no browser tab; uses Windows' built-in WebView2):
+
+```bash
+pip install pywebview
+python helm_app.py
+```
+
+**Arm the safety net** (recommended before enabling any automation):
+
+```text
+GUARDIAN.bat        external watchdog: snapshots + auto-revert on a bricked build
+REVERT-HELM.bat     panic button: full-restore to the last good snapshot
+```
+
+## Design
+
+- **Stdlib Python only.** `http.server.ThreadingHTTPServer` + a single `index.html`. No framework, no build, no DB — state is plain JSON files with atomic writes and a lock.
+- **One dispatcher.** Every state change flows through a single whitelisted action vocabulary (`agent_act`) — so the UI, the autonomous operator, and any external agent share one audited code path, with **no raw-shell escape hatch**.
+- **Loopback-only.** Binds `127.0.0.1`; the boundary is your machine.
+- **Honest by default.** No fabricated metrics; every published number carries its provenance; automation is bounded, audited, and reversible.
+
+## Safety model
+
+Automation here can be genuinely autonomous, so the guardrails are structural, not vibes:
+
+1. **Vocabulary, not a shell** — agents invoke only known actions, never arbitrary commands.
+2. **Audited** — every action is logged and shown in the UI.
+3. **Killable** — a kill switch stops the operator in ≤2s.
+4. **Reversible** — the external Guardian snapshots before risky changes and can full-revert a bricked build.
+
+## Configuration
+
+`config.json` (git-ignored, per-machine) holds your ventures/projects `{id, name, color, dir, what}`. Provider API
+keys live in your user environment, never in the repo. `config.example.json` ships as the template.
 
 ## Keywords
 
-`AI agent orchestration` · `Claude Code dashboard` · `multi-agent kanban` · `LLM token budget tracker` · `Codex Kimi Ollama` · `human-in-the-loop AI` · `local agent mission control` · `AI coding workflow`
+`Claude Code control plane` · `AI agent orchestration` · `multi-model router` · `LLM failover` · `local uncensored models`
+· `Ollama dashboard` · `AI workflow automation` · `self-healing agent tooling` · `human-in-the-loop AI`
 
-## License
+---
 
-MIT — see [LICENSE](LICENSE). Built by [Oorulogix](https://oorulogix.com).
+<p align="center"><sub>Local-first · single-user · MIT · built by <a href="https://www.oorulogix.com">Ooru Logix</a>, Bengaluru. · Repo/codename: <code>helm</code>.</sub></p>

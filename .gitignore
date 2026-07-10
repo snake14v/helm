@@ -46,3 +46,6 @@ _g_*.py
 # stray generated dirs (not part of HELM) — all brag-output variants (timestamped, -vertical, etc.)
 brag-output*/
 .playwright-mcp/
+
+# bridge captures (session workflow content) + guardian is external
+bridge/

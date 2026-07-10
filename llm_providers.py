@@ -89,9 +89,11 @@ def _key(env):
 
 _RUNTIME = os.path.join(os.path.dirname(os.path.abspath(__file__)), "runtime.json")
 def _model_override(provider):
-    """A working model the auto-fixer discovered for this provider (runtime.json modelOverrides)."""
+    """A working model the auto-fixer discovered for this provider (runtime.json modelOverrides).
+    Reads via aiop's locked reader so it never sees a half-written file (lazy import avoids a cycle)."""
     try:
-        return (json.loads(open(_RUNTIME, encoding="utf-8").read()).get("modelOverrides") or {}).get(provider)
+        import aiop
+        return (aiop.read_runtime().get("modelOverrides") or {}).get(provider)
     except Exception:
         return None
 

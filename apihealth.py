@@ -76,12 +76,13 @@ def diagnose(provider, res):
 
 
 def _set_model_override(provider, model):
-    try:
-        d = json.loads(open(L._RUNTIME, encoding="utf-8").read())
-    except Exception:
-        d = {}
-    d.setdefault("modelOverrides", {})[provider] = model
-    open(L._RUNTIME, "w", encoding="utf-8").write(json.dumps(d, indent=1))
+    # Route through aiop's ONE locked writer so a concurrent _set_runtime can't lose this update
+    # (lazy import: aiop imports this module's siblings at load, so importing at call-time avoids a cycle).
+    import aiop
+    with aiop.RT_LOCK:
+        d = aiop.read_runtime()
+        d.setdefault("modelOverrides", {})[provider] = model
+        aiop.write_runtime(d)
 
 
 def autofix(provider):

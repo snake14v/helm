@@ -16,6 +16,7 @@ import json, os, threading, time, re, tempfile
 import ablit as ablit_mod
 import llm_providers as llm_mod
 import model_rank
+import events
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 RUNTIME = os.path.join(ROOT, "runtime.json")
@@ -94,6 +95,7 @@ def write_runtime(d):
             try: os.remove(tmp)
             except Exception: pass
             raise
+    events.bump()   # runtime settings changed -> push a live tick (covers _set_runtime + operator cfg)
 
 
 _rt = read_runtime   # back-compat alias
@@ -159,6 +161,7 @@ def _write_audit(entry):
                 pass
     except Exception:
         pass
+    events.bump()   # operator acted -> push a live tick (audit feed + status update)
     return entry
 
 
