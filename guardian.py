@@ -159,7 +159,26 @@ def _write_heartbeat(state, extra=None):
         pass
 
 
+def _assert_real_python():
+    """FAIL LOUD if we're running under the Windows Store python alias.
+
+    Store-packaged Python gets filesystem write virtualization: every write to %LOCALAPPDATA%\\helm-guardian
+    is silently redirected into
+      %LOCALAPPDATA%\\Packages\\PythonSoftwareFoundation.Python.3.x_...\\LocalCache\\Local\\helm-guardian
+    So the watchdog would run happily while its snapshots, heartbeat and log land in a shadow folder that
+    the dashboard and REVERT-HELM.bat never read — an armed-looking safety net that cannot actually save you.
+    A guardian that might be mis-writing must refuse to run, not guess. (Found live 2026-07-10.)"""
+    if "WindowsApps" in sys.executable or "\\Packages\\PythonSoftwareFoundation" in sys.executable:
+        _log("FATAL: running under the Windows Store Python alias (%s).\n"
+             "       Its filesystem virtualization would redirect snapshots/heartbeat to a shadow folder.\n"
+             "       Re-run with a real interpreter, e.g.:  py -3 guardian.py watch\n"
+             "       or  %%LOCALAPPDATA%%\\Programs\\Python\\Python312\\python.exe guardian.py watch"
+             % sys.executable)
+        sys.exit(2)
+
+
 def watch(interval=20, fails_before_act=3):
+    _assert_real_python()
     """The last-resort net: poll health; on sustained brick, restart, then restore+restart. Independent
     of HELM — runs even if every HELM subsystem is dead. Takes a snapshot whenever health is freshly good."""
     _log(f"WATCH start — HELM_DIR={HELM_DIR} port={PORT} store={STORE}")
