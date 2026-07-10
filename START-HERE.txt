@@ -1,0 +1,34 @@
+╔══════════════════════════════════════════════════════════════════╗
+║   🔲  GLASSPANEL  —  by Ooru Logix                                 ║
+║   A Claude-focused AI workflow control plane, on your machine.     ║
+╚══════════════════════════════════════════════════════════════════╝
+
+▶ TO RUN IT
+   Double-click  GlassPanel.exe
+   The animated logo shows, then the dashboard opens in its own window.
+   (Or, if you have Python: double-click MISSION-CONTROL.bat, then open
+    http://localhost:8799 in a browser.)
+
+▶ TO PROTECT IT (recommended)
+   Double-click  GUARDIAN.bat   → an external watchdog that auto-reverts
+                                   GlassPanel if a bad change ever bricks it.
+   Leave that window running. Panic-restore anytime: REVERT-HELM.bat
+
+▶ FIRST-TIME SETUP
+   Copy  config.example.json  →  config.json  and edit it with YOUR project
+   folders. Add provider API keys inside the app (Analytics → Models) — they
+   live in your user environment, never in this folder.
+
+▶ WHAT'S IN THIS FOLDER
+   GlassPanel.exe        the app (bundled server + native window + logo splash)
+   README.md             full docs
+   *.py / *.html         the source (so self-update, guardian, runner all work)
+   *.bat / *.vbs         helpers (guardian, revert, runner, logins)
+   config.example.json   copy to config.json and edit
+   backups/              cold code snapshots (Guardian restore points)
+
+▶ NOTES
+   • Everything runs locally on 127.0.0.1 — nothing phones home.
+   • The app writes its state (state.json, runtime.json) right here in this
+     folder, so this ONE folder is the whole tool. Back it up by copying it.
+   • Open source: https://github.com/snake14v/helm

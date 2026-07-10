@@ -5,7 +5,9 @@
 # to it — one server, N clients. Run:  python helm_app.py   (or build a .exe with PyInstaller later).
 import os, socket, subprocess, sys, time
 
-ROOT = os.path.dirname(os.path.abspath(__file__))
+# frozen (GlassPanel.exe): app files sit next to the exe; normal run: this script's dir.
+ROOT = (os.path.dirname(sys.executable) if getattr(sys, "frozen", False)
+        else os.path.dirname(os.path.abspath(__file__)))
 PORT = 8799
 URL = f"http://127.0.0.1:{PORT}"
 
@@ -19,15 +21,22 @@ def _up(timeout=0.3):
 
 
 def _ensure_server():
-    """Start server.py hidden only if nothing is already serving :8799."""
+    """Start the server only if nothing is already serving :8799. Frozen exe runs it IN-PROCESS (the
+    server is bundled, so no python.exe on the machine is needed); a normal run spawns server.py hidden."""
     if _up():
         return "already running"
-    py = sys.executable
-    # pythonw.exe if present = no console flash; else CREATE_NO_WINDOW hides it.
-    pyw = os.path.join(os.path.dirname(py), "pythonw.exe")
-    exe = pyw if os.path.exists(pyw) else py
-    subprocess.Popen([exe, os.path.join(ROOT, "server.py")], cwd=ROOT,
-                     creationflags=0x08000000)  # CREATE_NO_WINDOW
+    if getattr(sys, "frozen", False):
+        try:
+            import server
+            server.serve(block=False)   # daemon-threaded in-process server (bundled into the exe)
+        except Exception as e:
+            return f"in-process start failed: {e}"
+    else:
+        py = sys.executable
+        pyw = os.path.join(os.path.dirname(py), "pythonw.exe")   # no console flash if present
+        exe = pyw if os.path.exists(pyw) else py
+        subprocess.Popen([exe, os.path.join(ROOT, "server.py")], cwd=ROOT,
+                         creationflags=0x08000000)  # CREATE_NO_WINDOW
     for _ in range(80):          # wait up to ~8s for the port
         if _up():
             return "started"

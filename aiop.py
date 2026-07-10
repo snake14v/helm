@@ -17,6 +17,7 @@ import ablit as ablit_mod
 import llm_providers as llm_mod
 import model_rank
 import events
+import sysmem
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 RUNTIME = os.path.join(ROOT, "runtime.json")
@@ -266,13 +267,19 @@ def decide(snap, c):
     prompt = _build_prompt(snap)
     model = operator_model(c)
     used, raw, err = model, "", None
-    if ablit_mod.ollama_up():
+    # RAM GUARD: driving Ollama makes it load a model resident (a 4B Q4 ~3.3 GB). On a small box that
+    # can swap-death the machine. If free RAM is under the floor, DON'T load locally — prefer the cloud
+    # tier, and if that's off, skip the tick with an honest reason instead of hanging the PC.
+    ram_ok, ram_why = sysmem.can_load_local_model()
+    if ablit_mod.ollama_up() and ram_ok:
         r = ablit_mod.chat(model, prompt, timeout=150)
         model_rank.record(model, r.get("ok"), r.get("ms"), kind="local")  # the only thing that makes ranking adapt
         if r.get("ok"):
             raw = r.get("text", "")
         else:
             err = r.get("error")
+    elif not ram_ok and not c.get("allowCloud"):
+        err = f"skipped — {ram_why}"
     elif c.get("allowCloud"):
         r = llm_mod.call_first_available(prompt, max_tokens=800, timeout=90)
         if r.get("ok"):
@@ -354,6 +361,8 @@ def stop():
 def status():
     c = cfg()
     running = bool(_thread and _thread.is_alive() and not _KILL.is_set() and c.get("enabled"))
+    ram_ok, ram_why = sysmem.can_load_local_model()   # so the UI can say WHY it won't load a local model
     return {**c, "running": running, "activeModel": operator_model(c),
             "ollama": ablit_mod.ollama_up(), "wired": bool(_SENSOR and _ACTOR),
+            "ramOk": ram_ok, "ramWhy": ram_why, "memory": sysmem.status(),
             "manifest": [m["action"] for m in MANIFEST]}

@@ -1,7 +1,7 @@
 # Mission Control server - stdlib only, no deps. Serves the dashboard + live APIs.
 # Run: python server.py   ->  http://localhost:8799
 # APIs: /api/summary (token usage), /api/workflows (runs), /api/services (health), /api/state (kanban/ratings, GET/POST)
-import difflib, json, os, re, shutil, tempfile, threading, time, urllib.request
+import difflib, json, os, re, shutil, sys, tempfile, threading, time, urllib.request
 import doctor as doctor_mod
 import nba as nba_mod
 import agents_hq
@@ -20,11 +20,15 @@ import model_rank as model_rank_mod
 import router as router_mod
 import events as events_mod
 import bridge as bridge_mod
+import sysmem as sysmem_mod
 from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-ROOT = Path(__file__).parent
+# When frozen into a single GlassPanel.exe (PyInstaller), the app's files (index.html, state.json,
+# config.json, the .bat helpers…) live NEXT TO THE EXE — not in PyInstaller's temp _MEIPASS unpack dir.
+# So resolve ROOT to the exe's folder when frozen, and to the source dir on a normal `python server.py`.
+ROOT = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).parent
 PROJECTS = Path.home() / ".claude" / "projects"
 STATE_FILE = ROOT / "state.json"
 _state_lock = threading.RLock()   # serialize state.json read-modify-write (operator loop vs request threads)
@@ -278,7 +282,7 @@ def running_progress():
     return {"missions": out, "liveRuns": [r for r in workflows() if r.get("live")]}
 
 # ---------------- runner health + runtime settings (self-heal plumbing) ----------------
-RUNTIME = os.path.join(os.path.dirname(os.path.abspath(__file__)), "runtime.json")
+RUNTIME = str(ROOT / "runtime.json")   # next to the exe when frozen (see ROOT above)
 
 def _runtime():
     return aiop_mod.read_runtime()   # shared lock + atomic writer live in aiop (one owner of runtime.json)
@@ -378,6 +382,23 @@ def health_panels():
     carrying its own click-to-control actions (engage the operator, restart the runner, arm guardian…)."""
     now = time.time()
     P = []
+    # SYSTEM RAM first — on a 16 GB box this is the panel that stops the machine from hanging. The
+    # oil-level gauge is literal: % of physical RAM used. Ollama models are the biggest reclaimable chunk.
+    try:
+        mem = sysmem_mod.status()
+        held = sysmem_mod.ollama_loaded()
+        heldgb = round(sum(m["gb"] for m in held), 1)
+        mem_actions = []
+        if held:
+            mem_actions.append({"label": f"🧹 Free {heldgb} GB (unload local models)",
+                                "kind": "post", "url": "/api/mem/reclaim"})
+        mem_actions.append({"label": "Open Task Manager", "kind": "post", "url": "/api/mem/taskmgr"})
+        detail = (f"{heldgb} GB held by Ollama · GlassPanel ~{sysmem_mod.self_mb()} MB" if held
+                  else f"GlassPanel itself uses ~{sysmem_mod.self_mb()} MB")
+        P.append(_panel("memory", "SYSTEM RAM", mem["state"], True, detail,
+                        f"{mem['availGB']} GB free", level=mem["usedPct"], kind="gauge", actions=mem_actions))
+    except Exception:
+        pass
     P.append(_panel("server", "SERVER", "run", True, "stdlib http.server :8799", "online",
                     actions=[{"label": "↻ Reload dashboard", "kind": "reload"},
                              {"label": "Open in browser ↗", "kind": "open", "url": "http://localhost:8799"}]))
@@ -456,7 +477,7 @@ def health_panels():
 # Ventures/paths are NOT hardcoded - they come from config.json (this machine, git-ignored) so
 # HELM is multi-user. Falls back to config.example.json, then a minimal default. Edit config.json
 # or the UI never sees your personal paths in the shipped code.
-_CFG_DIR = os.path.dirname(os.path.abspath(__file__))
+_CFG_DIR = str(ROOT)   # config.json + the .bat/.vbs helpers live next to the exe when frozen
 def load_config():
     for p in (os.path.join(_CFG_DIR, "config.json"), os.path.join(_CFG_DIR, "config.example.json")):
         try:
@@ -1518,6 +1539,19 @@ class H(BaseHTTPRequestHandler):
                 return self._json({"ok": False, "error": "action must be arm|snapshot"}, 400)
             except Exception as e:
                 return self._json({"ok": False, "error": str(e)}, 400)
+        if path0 == "/api/mem/reclaim":
+            # Get RAM back: evict every model Ollama is holding resident (often 3-4 GB on a 4B model).
+            res = sysmem_mod.unload_ollama()
+            res["memory"] = sysmem_mod.status()
+            res["msg"] = (f"freed {res['freedGB']} GB ({', '.join(res['unloaded'])})" if res["unloaded"]
+                          else "nothing was loaded — no RAM to reclaim")
+            events_mod.bump()
+            return self._json(res)
+        if path0 == "/api/mem/taskmgr":
+            try:
+                os.startfile("taskmgr.exe"); return self._json({"ok": True, "msg": "opened Task Manager"})
+            except Exception as e:
+                return self._json({"ok": False, "error": str(e)}, 400)
         if path0 in ("/api/bridge/capture", "/api/bridge/push"):
             # THE FULL-PERMISSIONS TRANSFER SLOT (loopback-only). capture = index a Claude session's
             # workflow into HELM as a spec + mission; push = a Claude session shoves a workflow straight
@@ -1716,12 +1750,15 @@ class H(BaseHTTPRequestHandler):
                 return self._json({"ok": False, "error": str(e)}, 400)
         self._json({"error": "not found"}, 404)
 
-if __name__ == "__main__":
+def serve(block=True):
+    """Start the server. block=True runs forever (CLI); block=False returns after starting a daemon
+    thread (so GlassPanel.exe can run the server in-process behind the native window). Returns True if
+    this instance is serving, False if another instance already holds the port."""
     try:
         srv = ThreadingHTTPServer(("127.0.0.1", PORT), H)
     except OSError:
-        print(f"Mission Control already running on :{PORT} - this instance exits (harmless).")
-        raise SystemExit(0)
+        print(f"GlassPanel already running on :{PORT} - this instance won't bind (harmless).")
+        return False
     _load_cache()
     threading.Thread(target=_scan, daemon=True).start()
     # AI operator: inject sense+act hooks; resume the autonomous loop if it was left engaged.
@@ -1731,5 +1768,13 @@ if __name__ == "__main__":
             aiop_mod.start(); print("AI operator resumed (was engaged) - full auto")
         except Exception as e:
             print("AI operator resume failed:", e)
-    print(f"Mission Control -> http://localhost:{PORT}  (first usage scan runs in background)")
-    srv.serve_forever()
+    print(f"GlassPanel -> http://localhost:{PORT}  (first usage scan runs in background)")
+    if block:
+        srv.serve_forever()
+    else:
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return True
+
+
+if __name__ == "__main__":
+    serve(block=True)
