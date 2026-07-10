@@ -186,22 +186,28 @@ def watch(interval=20, fails_before_act=3):
     bad = 0
     prev_ok = True
     while True:
-        h = health()
-        _write_heartbeat("watching", {"helm": h})
-        if h["ok"]:
-            if not prev_ok:
-                _log("HELM recovered"); snapshot("post-recovery")
-            bad, prev_ok = 0, True
-        else:
-            bad += 1; prev_ok = False
-            _log(f"UNHEALTHY ({bad}/{fails_before_act}): {h['detail']}")
-            if bad == fails_before_act:
-                if not h["compiles"]:
-                    _log("code is broken -> RESTORING last good snapshot"); restore("latest"); _restart_server()
-                else:
-                    _log("code ok but server down -> restarting"); _restart_server()
-            elif bad > fails_before_act + 3:
-                _log("still down after restore+restart -> restoring again"); restore("latest"); _restart_server(); bad = fails_before_act
+        # The whole body is wrapped: a watchdog must NEVER die from a transient error in health()/
+        # restore()/_write_heartbeat() — that's how it kept silently vanishing across restarts. On any
+        # error it logs and loops; the heartbeat then goes stale and the panel/GUARDIAN.bat can act.
+        try:
+            h = health()
+            _write_heartbeat("watching", {"helm": h})
+            if h["ok"]:
+                if not prev_ok:
+                    _log("HELM recovered"); snapshot("post-recovery")
+                bad, prev_ok = 0, True
+            else:
+                bad += 1; prev_ok = False
+                _log(f"UNHEALTHY ({bad}/{fails_before_act}): {h['detail']}")
+                if bad == fails_before_act:
+                    if not h["compiles"]:
+                        _log("code is broken -> RESTORING last good snapshot"); restore("latest"); _restart_server()
+                    else:
+                        _log("code ok but server down -> restarting"); _restart_server()
+                elif bad > fails_before_act + 3:
+                    _log("still down after restore+restart -> restoring again"); restore("latest"); _restart_server(); bad = fails_before_act
+        except Exception as e:
+            _log(f"watch-loop error (surviving): {type(e).__name__}: {e}")
         time.sleep(interval)
 
 

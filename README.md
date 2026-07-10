@@ -79,7 +79,7 @@ REVERT-HELM.bat     panic button: full-restore to the last good snapshot
 
 - **Stdlib Python only.** `http.server.ThreadingHTTPServer` + a single `index.html`. No framework, no build, no DB — state is plain JSON files with atomic writes and a lock.
 - **One dispatcher.** Every state change flows through a single whitelisted action vocabulary (`agent_act`) — so the UI, the autonomous operator, and any external agent share one audited code path, with **no raw-shell escape hatch**.
-- **Loopback-only.** Binds `127.0.0.1`; the boundary is your machine.
+- **Loopback-only + guarded.** Binds `127.0.0.1`, and rejects any request whose `Host` isn't a loopback authority or whose `Origin` is foreign — so a malicious page in your browser (or a DNS-rebind) cannot drive it. Proven by `test_security.py`.
 - **Honest by default.** No fabricated metrics; every published number carries its provenance; automation is bounded, audited, and reversible.
 
 ## Safety model
@@ -90,6 +90,13 @@ Automation here can be genuinely autonomous, so the guardrails are structural, n
 2. **Audited** — every action is logged and shown in the UI.
 3. **Killable** — a kill switch stops the operator in ≤2s.
 4. **Reversible** — the external Guardian snapshots before risky changes and can full-revert a bricked build.
+
+## Honest limitations (read before trusting it)
+
+- **Windows-only today.** Paths, the RAM guard, the process tools, and the launchers use Windows APIs. A Linux/macOS port is not done.
+- **The failover chain's Codex leg runs `codex` at `--dangerously-bypass-approvals-and-sandbox` (approval: never).** When a mission fails over to Codex, that tier executes with full local access and no per-action prompt — the human gate is the *mission approval*, not each command. Only enable failover on work you'd let an agent run unattended.
+- **Single-user.** No auth, no accounts, no RBAC. It assumes one trusted operator on one machine.
+- **The autonomous operator is only as good as its local model.** A small model makes weak calls; that's why every action is bounded, audited, and reversible rather than trusted.
 
 ## Configuration
 

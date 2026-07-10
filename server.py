@@ -465,12 +465,18 @@ def health_panels():
     try:
         hbp = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "helm-guardian", "heartbeat.json")
         hb = json.loads(open(hbp, encoding="utf-8").read())
-        watching = (now - hb.get("ts", 0) / 1000) < 90
-        age = hb.get("lastSnapshotAgeSec")
-        P.append(_panel("guardian", "GUARDIAN", "run" if watching else "warn", watching,
-                        (f"last snapshot {age}s ago" if age is not None else "no snapshot yet"),
-                        "watching" if watching else "armed", kind="gear",
-                        actions=([_g_snap] if watching else [_g_arm, _g_snap])))
+        hb_age = now - hb.get("ts", 0) / 1000
+        watching = hb_age < 90
+        snap_age = hb.get("lastSnapshotAgeSec")
+        if watching:
+            P.append(_panel("guardian", "GUARDIAN", "run", True,
+                            (f"last snapshot {snap_age}s ago" if snap_age is not None else "no snapshot yet"),
+                            "watching", kind="gear", actions=[_g_snap]))
+        else:
+            # Heartbeat exists but is stale => the watchdog DIED. Say so plainly, don't show "armed".
+            P.append(_panel("guardian", "GUARDIAN", "warn", False,
+                            f"heartbeat {int(hb_age/60)} min stale — watchdog died, RE-ARM it",
+                            "STALE", kind="gear", actions=[_g_arm, _g_snap]))
     except Exception:
         P.append(_panel("guardian", "GUARDIAN", "idle", False, "click to arm the watchdog", "off",
                         actions=[_g_arm, _g_snap]))

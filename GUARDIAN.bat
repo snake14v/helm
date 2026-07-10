@@ -34,5 +34,12 @@ echo Guardian watching GlassPanel at %HELM_DIR%
 echo Interpreter: %PY%
 echo Snapshots + logs: %GDIR%
 echo Close this window to stop watching. GlassPanel keeps running either way.
+:watchloop
 %PY% "%GDIR%\guardian.py" watch
-pause
+REM If the watch process ever exits (crash, transient kill), relaunch it — a watchdog that dies is
+REM worse than none. Only a closed console or a PC crash stops it now. Exit code 2 = wrong interpreter
+REM (fail-loud), so don't loop on that.
+if errorlevel 2 ( echo Guardian refused to run under this interpreter - not relooping. & pause & exit /b 2 )
+echo [%date% %time%] guardian watch exited - relaunching in 3s...
+timeout /t 3 /nobreak >nul
+goto watchloop
