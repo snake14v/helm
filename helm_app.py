@@ -36,17 +36,34 @@ def _ensure_server():
 
 
 def main():
-    status = _ensure_server()
-    if not _up():
-        print(f"HELM server did not come up ({status}) — run 'python server.py' and retry.")
-        sys.exit(1)
     import webview
-    webview.create_window(
-        "GlassPanel", URL,
+    # Show the animated GlassPanel logo splash INSTANTLY, boot the server behind it, then swap to the app.
+    splash = os.path.join(ROOT, "splash.html")
+    start_url = splash if os.path.exists(splash) else URL
+    window = webview.create_window(
+        "GlassPanel", start_url,
         width=1360, height=860, min_size=(960, 640),
-        background_color="#0a0c10",   # match the app's dark bg so there's no white flash
+        background_color="#05070a",   # matches the splash bg so there's no white flash
     )
-    webview.start()   # blocks until the window is closed
+
+    def _boot():
+        _ensure_server()
+        t0 = time.time()
+        while not _up() and time.time() - t0 < 15:
+            time.sleep(0.15)
+        time.sleep(1.9)   # minimum splash time so the logo animation actually plays before the swap
+        try:
+            if _up():
+                window.load_url(URL)
+            else:
+                window.load_url("data:text/html,<body style='background:#05070a;color:#e8ecf1;"
+                                "font:15px sans-serif;display:flex;align-items:center;justify-content:center;"
+                                "height:100vh'>GlassPanel server didn't start &mdash; run "
+                                "<code style='margin:0 6px'>python server.py</code></body>")
+        except Exception:
+            pass
+
+    webview.start(_boot)   # runs _boot on a worker thread after the window opens; blocks until closed
 
 
 if __name__ == "__main__":
