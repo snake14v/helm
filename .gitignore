@@ -49,3 +49,6 @@ brag-output*/
 
 # bridge captures (session workflow content) + guardian is external
 bridge/
+
+# Serena MCP project config (tool cruft, per-machine)
+.serena/
