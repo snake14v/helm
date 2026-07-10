@@ -31,6 +31,9 @@ from pathlib import Path
 ROOT = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).parent
 PROJECTS = Path.home() / ".claude" / "projects"
 STATE_FILE = ROOT / "state.json"
+# loopback-guard allowlists (see H._guarded): the only Host/Origin values a legitimate same-origin UI uses.
+_LOOPBACK_AUTH = {"127.0.0.1:8799", "localhost:8799", "[::1]:8799", "127.0.0.1", "localhost", "[::1]"}
+_ALLOWED_ORIGINS = {"http://127.0.0.1:8799", "http://localhost:8799", "http://[::1]:8799"}
 _state_lock = threading.RLock()   # serialize state.json read-modify-write (operator loop vs request threads)
 CACHE_FILE = ROOT / "usage-cache.json"
 PORT = 8799
@@ -929,6 +932,22 @@ class H(BaseHTTPRequestHandler):
         except Exception:
             pass
 
+    # --- loopback guard: close the "any webpage can drive GlassPanel" hole (report's #1 finding) ---
+    # The server binds 127.0.0.1, but that alone does NOT stop a malicious page open in the user's
+    # browser from POSTing to http://localhost:8799/api/launch, nor a DNS-rebind attack. Two header
+    # checks the browser sets and JS cannot forge close both, breaking nothing legitimate (the UI is
+    # always same-origin on a loopback host):
+    #   Host   must be a loopback authority   -> defeats DNS-rebinding (attacker's domain in Host)
+    #   Origin (when present) must be our own  -> defeats a foreign page CSRF-driving us
+    def _guarded(self):
+        host = (self.headers.get("Host") or "").split(",")[0].strip().lower()
+        if host and host not in _LOOPBACK_AUTH:
+            return {"ok": False, "error": "blocked: non-loopback Host (possible DNS-rebind)"}, 403
+        origin = self.headers.get("Origin")
+        if origin and origin.strip().lower() not in _ALLOWED_ORIGINS:
+            return {"ok": False, "error": "blocked: cross-origin request"}, 403
+        return None
+
     def do_GET(self):
         try:
             self._get()
@@ -936,6 +955,9 @@ class H(BaseHTTPRequestHandler):
             self._fail(e)
 
     def _get(self):
+        blocked = self._guarded()          # rebind/cross-origin reads blocked too (e.g. exfiltrating /api/state)
+        if blocked:
+            return self._json(blocked[0], blocked[1])
         p = self.path.split("?")[0]
         if p == "/api/events":
             # SSE live-push: one long-lived stream per client. Emits "tick" the instant any state write
@@ -1118,6 +1140,9 @@ class H(BaseHTTPRequestHandler):
             self._fail(e)
 
     def _post(self):
+        blocked = self._guarded()          # reject foreign-origin / rebind before ANY mutation runs
+        if blocked:
+            return self._json(blocked[0], blocked[1])
         path0 = self.path.split("?")[0]
         if path0 == "/api/launch":
             # day-start tiers, WHITELISTED profiles only (never arbitrary commands)
